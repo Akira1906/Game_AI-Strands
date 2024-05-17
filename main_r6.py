@@ -8,6 +8,7 @@ import time
 import pygame
 import timeit
 import concurrent.futures
+from multiprocessing import Pool
 
 pygame.init()
 
@@ -476,14 +477,15 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
 # current_board: copy of the game board
 # current_turn : 'black' or 'white'
 
-def generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number):
+def generate_possible_moves_multithread(hexes_by_label, curr_board, player_color, game_round_number):
     possible_moves = []
     combinations_cache = {}
 
     def process_combination(label, combination):
         coordinates = [hex_info[0] for hex_info in combination]
-        continuous_neighbors = count_continuous_neighbors(coordinates)   
-        if (label == 5 and len(hexes_by_label[label]) > 15 and continuous_neighbors < 3):
+        continuous_neighbors = count_continuous_neighbors(coordinates)
+        if (label == 5 and len(hexes_by_label[label]) > 15 and continuous_neighbors < 3)or \
+           (game_round_number < 5 and continuous_neighbors < label):
             return
 
         board_copy = copy.deepcopy(curr_board)
@@ -516,6 +518,46 @@ def generate_possible_moves(hexes_by_label, curr_board, player_color, game_round
         concurrent.futures.wait(futures)
 
     return possible_moves
+
+def generate_possible_moves_singlethread(hexes_by_label, curr_board, player_color, game_round_number):
+    possible_moves = []
+    for label in list(hexes_by_label.keys()):
+            hex_list = hexes_by_label[label]
+            label_int = int(label)
+
+            if len(hex_list) < label_int:
+                combinations = [hex_list]
+            else:
+                combinations = itertools.combinations(hex_list, label_int)
+
+            for combination in combinations:
+                # continuous_neighbors = count_continuous_neighbors([hex_info[0] for hex_info in combination])
+                continuous_neighbors = random.randint(0, 6)
+                if label_int == 5 and len(hexes_by_label[label]) > 15:
+                    if continuous_neighbors < 3:
+                        continue
+
+                if game_round_number < 5:
+                    if continuous_neighbors < label_int:
+                        continue
+
+                board_copy = copy.deepcopy(curr_board)
+                hexes_by_label_copy = copy.deepcopy(hexes_by_label)
+
+                for hex_info in combination:
+                    board_copy[hex_info[0]]['owner'] = player_color
+                    board_copy[hex_info[0]]['selected'] = True
+
+                for hex_info in combination:
+                    hexes_by_label_copy[label].remove(hex_info)
+
+                possible_moves.append(
+                    (hexes_by_label_copy, board_copy, combination))
+    return possible_moves
+
+def generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number):
+    return generate_possible_moves_singlethread(hexes_by_label, curr_board, player_color, game_round_number)
+    
 
 def min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
     """
@@ -571,10 +613,11 @@ def min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth,
         best_utility = float('inf')
         possible_moves = []
         print("min: generate possible moves...")
-
+        before = time.time()
         # generate the possible moves (leaves)
         possible_moves = generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number)
-
+        after = time.time()
+        print('min: generate possible moves time: ' + str(after - before))
         random.shuffle(possible_moves)
         print('min: generated possible moves: ' + str(len(possible_moves)))
         for hexes_by_label_copy, board_copy, combination in possible_moves:
@@ -641,8 +684,8 @@ def benchmark_count_continuous_neighbors():
     return count_continuous_neighbors(coords)
 
 # Benchmark the function using timeit.timeit()
-# execution_time = timeit.timeit(benchmark_count_continuous_neighbors, number=10000)
-# print(f"Execution time for 10000 calls: {execution_time:.6f} seconds")
+execution_time = timeit.timeit(benchmark_count_continuous_neighbors, number=40000)
+print(f"Execution time for 10000 calls: {execution_time:.6f} seconds")
 # # Example usage:
 # coordinates = [(0, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]
 # print(count_continuous_neighbors(coordinates))  # Output: 6
