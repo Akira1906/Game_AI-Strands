@@ -7,6 +7,7 @@ import sys
 import time
 import pygame
 import timeit
+import concurrent.futures
 
 pygame.init()
 
@@ -229,9 +230,7 @@ def calculate_connected_areas(color):
 def display_connected_areas():
     """Displays the size of the largest connected areas for black and white pieces."""
     black_area = calculate_connected_areas(1)  # 黑子的標籤為1
-    print('Biggest area of black:', black_area)
     white_area = calculate_connected_areas(2)  # 白子的標籤為2
-    print('Biggest are of white', white_area)
     black_text = font.render(f"Black Area: {black_area}", True, BLACK)
     white_text = font.render(f"White Area: {white_area}", True, WHITE)
     screen.blit(black_text, (10, 10))
@@ -455,44 +454,30 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
         if available_labels:
             me_player_black = curr_turn == 'black'
             best_move = min_max_search(copy.deepcopy(hexes_by_label), copy.deepcopy(
-                hexagon_board), me_player_black, 1, max_mode= True)
-
-            selected_hexes.extend([(hex, hexagon_board[hex]) for hex in hexagon_board.keys() if hex in best_move])
-
-            # selected_label = random.choice(list(available_labels.keys()))
-            # available_hexes = [
-            #     (pos, hex_info) for pos, hex_info in available_labels[selected_label] if not hex_info['selected']]
-            # # Determine the number of hexagons to select based on their labels.
-            # n = selected_label
-
-            # # Randomly select n hexes, select all remaining hexes if fewer than n are available
-            # if len(available_hexes) > n:
-            #     selected_hexes.extend(random.sample(available_hexes, n))
-            # else:
-            #     selected_hexes.extend(available_hexes)
+                hexagon_board), me_player_black, 1, max_mode=True, curr_turn=curr_turn)
+            print("choose move with best utility: " + str(best_move))
+            selected_hexes.extend([(hex, hexagon_board[hex])
+                                  for hex in hexagon_board.keys() if hex in best_move])
 
         print(curr_round)
     return selected_hexes
-
-# returns an estimate of the utility of a game position
-
 
 # hexes_by_label: available hexes to choose from grouped by label
 # current_board: copy of the game board
 # current_turn : 'black' or 'white'
 
 
-def min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth, max_mode):
+def min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth, max_mode, curr_turn):
     """
     Performs a min-max search on the game tree to evaluate possible moves.
-    
+
     Args:
         hexes_by_label (dict): Available hexes to choose from grouped by label.
         curr_board (dict): Copy of the game board.
         me_player_black (bool): Indicates if the current player is black.
         remaining_depth (int): Remaining depth of the search.
         max_mode (bool): Indicates if it's the max player's turn.
-    
+
     Returns:
         Utility of the game position.
     """
@@ -501,60 +486,71 @@ def min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth,
     # create a game tree, evaluate every possible
     # Iterative-deepening: when time is up, return the move selected by the deepest searc
     # Dictionary mapping list of moves to utility
-    
+
     curr_player_black = me_player_black ^ (not max_mode)
-    # 0 ^ not(1) = 0
-    # 1 ^ not(1) = 1
-    # 0 ^ not(0) = 1
-    # 1 ^ not(0) = 0
 
     if remaining_depth == 0:
-        return evaluate_board_position(curr_board, me_player_black)
+        return evaluate_board_position(curr_board, me_player_black, curr_turn)
     move_utilities = {}
     for label in list(hexes_by_label.keys()):
         execute_label_counter = 0
-        for combination in itertools.combinations(hexes_by_label[label], int(label)):
+        hex_list = hexes_by_label[label]
+        label_int = int(label)
+
+        if len(hex_list) < label_int:
+            combinations = [hex_list]
+        else:
+            combinations = itertools.combinations(hex_list, label_int)
+
+        for combination in combinations:
             if label == 5 and len(hexes_by_label[label]) > 15:
                 coordinates = [hex_info[0] for hex_info in combination]
                 if count_continuous_neighbors(coordinates) < 3:
                     continue
-            
+
             # Create a copy of the current board
             board_copy = copy.deepcopy(curr_board)
             hexes_by_label_copy = copy.deepcopy(hexes_by_label)
             # Update the board with the selected hexes
-            color = 'white'
-            if curr_player_black:
-                color = 'black'
-            for hex_info in combination:
+            color = 'black' if curr_player_black else 'white'
 
+            for hex_info in combination:
                 board_copy[hex_info[0]]['owner'] = color
                 board_copy[hex_info[0]]['selected'] = True
+
             # Update the hexes_by_label_copy by removing the selected hexes
             for hex_info in combination:
                 hexes_by_label_copy[label].remove(hex_info)
+
             # Evaluate the board position
-            utility = min_max_search(hexes_by_label_copy, board_copy, me_player_black, remaining_depth - 1, not max_mode)
+            utility = min_max_search(
+                hexes_by_label_copy, board_copy, me_player_black, remaining_depth - 1, not max_mode, curr_turn)
+
             # Update the utility value for the current label
             move_tuple = tuple([hex_info[0] for hex_info in combination])
             move_utilities[move_tuple] = utility
             execute_label_counter += 1
-        print (f"Label {label} executed {execute_label_counter} times")
+        print(f"Label {label} executed {execute_label_counter} times")
 
-    if max_mode:
-        return max(move_utilities)
-    else:
-        return min(move_utilities)
-    # returns the optimal next move and its utility value
-    return
+        if max_mode:
+            max_utility = max(move_utilities.values())
+            best_moves = [
+                move for move, utility in move_utilities.items() if utility == max_utility]
+        else:
+            min_utility = min(move_utilities.values())
+            best_moves = [
+                move for move, utility in move_utilities.items() if utility == min_utility]
+
+    return random.choice(best_moves)
+
 
 def get_neighbors(coord):
     """
     Returns a list of neighboring coordinates for a given coordinate in a hexagonal grid.
-    
+
     Args:
         coord (tuple): The coordinate for which neighbors are to be found.
-        
+
     Returns:
         list: A list of neighboring coordinates.
     """
@@ -563,11 +559,10 @@ def get_neighbors(coord):
     return [(coord[0] + dx, coord[1] + dy) for dx, dy in neighbors]
 
 
-
 def count_continuous_neighbors(coordinates):
     coordinates_set = set(coordinates)
     visited = set()
-    
+
     def flood_fill(coord):
         stack = [coord]
         cluster_size = 0
@@ -590,6 +585,7 @@ def count_continuous_neighbors(coordinates):
 
     return max_cluster_size
 
+
 def benchmark_count_continuous_neighbors():
     coords = [(0, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]
     return count_continuous_neighbors(coords)
@@ -608,12 +604,13 @@ def benchmark_count_continuous_neighbors():
 def are_neighbors(coord1, coord2):
     # Define the six possible relative positions of neighbors in a hexagonal grid
     neighbors = [(0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1), (1, 0)]
-    
+
     # Calculate the relative position between the two coordinates
     relative_position = (coord2[0] - coord1[0], coord2[1] - coord1[1])
-    
+
     # Check if the relative position is one of the six possible neighbors
     return relative_position in neighbors
+
 
 def count_hexagons_of(player_black):
     color = 'black' if player_black else 'white'
@@ -633,7 +630,7 @@ def count_hexagons_of(player_black):
 # print(are_neighbors(coord1, coord3))  # Output: False
 
 
-def evaluate_board_position(curr_board, player_black):
+def evaluate_board_position(curr_board, player_black, curr_turn):
     # calculate the utility of the board position for player curr_turn
     # own_connected_area = count_connected_area(curr_board, 'black')
     # enemy_connected_area = count_connected_area(curr_board, 'white')
@@ -645,11 +642,14 @@ def evaluate_board_position(curr_board, player_black):
     enemy_connected_area = count_connected_area(curr_board, enemy_color)
     own_total_area = count_hexagons_of(player_black)
     enemy_total_area = count_hexagons_of(not player_black)
+    connected_factor = curr_turn * 0.1
 
-    return own_connected_area*2 + own_total_area
+    return (own_connected_area - enemy_connected_area) * connected_factor + own_total_area - enemy_total_area
 
 # fix of the original calculate_connected_areas function
 #
+
+
 def count_connected_area(curr_board, player_color):
     # Calculates the largest connected area of hexes of the specified color.
 
@@ -722,10 +722,10 @@ def main(black_player, white_player):
         check_timeout_and_autocomplete()
         # Handle all events in the game
         for event in pygame.event.get():
-            black_area = calculate_connected_areas(1)
-            print('Biggest area of black:', black_area)
-            white_area = calculate_connected_areas(2)
-            print('Biggest are of white', white_area)
+            # black_area = calculate_connected_areas(1)
+            # print('Biggest area of black:', black_area)
+            # white_area = calculate_connected_areas(2)
+            # print('Biggest are of white', white_area)
             if event.type == pygame.QUIT:
                 # Exit the game if the window is closed
                 pygame.quit()
@@ -783,6 +783,11 @@ def main(black_player, white_player):
                 # Wait a second to let players see AI's choice
                 pygame.time.wait(100)
                 Count_Hexagons_by_Owner()
+                black_area = calculate_connected_areas(1)
+                white_area = calculate_connected_areas(2)
+                print("Area: {white: " + str(white_area) +
+                      ", black: " + str(black_area) + "}")
+
                 # time.sleep(1)
                 current_turn = 'white' if current_turn == 'black' else 'black'
                 turn_ended = True
@@ -852,7 +857,7 @@ def main(black_player, white_player):
 
 if __name__ == "__main__":
     sys.argv.append('ai')
-    sys.argv.append('human')
+    sys.argv.append('random')
     if len(sys.argv) != 3:
         print("Usage: python main.py [player1_type] [player2_type]")
         print("player1_type and player2_type should be 'human' or 'random'")
