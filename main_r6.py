@@ -9,6 +9,8 @@ import pygame
 import timeit
 import concurrent.futures
 from multiprocessing import Pool
+import threading
+import asyncio
 
 pygame.init()
 
@@ -464,14 +466,79 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
                 label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in hexes_by_label.items()
             }
 
-            best_move = min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, float(
-                '-inf'), float('inf'), max_mode=True, game_round_number=curr_round)
+            best_move = min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, float('-inf'), float('inf'), max_mode=True, game_round_number=curr_round)
+            # best_move = iterative_deepening(hexes_by_label_copy, board_copy, me_player_black, 8, curr_turn, curr_round)
+            # best_move = asyncio.run(iterative_deepening(hexes_by_label_copy, board_copy, me_player_black, 8, curr_turn, curr_round))
             print("choose move with best utility: " + str(best_move))
             selected_hexes.extend([(hex, hexagon_board[hex])
                                   for hex in hexagon_board.keys() if hex in best_move[1]])
 
         print(curr_round)
     return selected_hexes
+
+def iterative_deepening_futures(hexes_by_label, curr_board, me_player_black, max_time, curr_turn, game_round_number):
+    start_time = time.time()
+    best_move = None
+    best_utility = float('-inf') if curr_turn == 'black' else float('inf')
+
+    def time_limit_reached():
+        return (time.time() - start_time) >= max_time
+
+    depth = 1
+    while not time_limit_reached():
+        print(f"Starting search at depth {depth}")
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(min_max_search, hexes_by_label, curr_board, me_player_black, depth, float('-inf'), float('inf'), curr_turn == 'black', game_round_number)
+            try:
+                utility, move = future.result(timeout=max_time - (time.time() - start_time))
+                print(f"Depth {depth} completed: utility={utility}, move={move}")
+                best_utility = utility
+                best_move = move
+            except concurrent.futures.TimeoutError:
+                print(f"Timeout reached at depth {depth}")
+                # Stop the future executor         
+                break  # Time limit reached, break out of the loop
+        depth += 1
+
+    if best_move is None:
+        # Fallback to random move if no move was found within the time limit
+        available_moves = [coord for label, hex_list in hexes_by_label.items() for coord, _ in hex_list if _['owner'] is None]
+        best_move = random.sample(available_moves, 1)
+        print(f"Fallback to random move: {best_move}")
+    print(f"Best move found: {best_move}")
+    return best_utility, best_move
+
+async def iterative_deepening(hexes_by_label, curr_board, me_player_black, max_time, curr_turn, game_round_number):
+    start_time = time.time()
+    best_move = None
+    best_utility = float('-inf')
+
+    async def search_depth(depth):
+        nonlocal best_move, best_utility
+        print(f"Starting search at depth {depth}")
+        utility, move = min_max_search(hexes_by_label, curr_board, me_player_black, depth, float('-inf'), float('inf'), curr_turn == 'black', game_round_number)
+        print(f"Depth {depth} completed: utility={utility}, move={move}")
+        if (curr_turn == 'black' and utility > best_utility) or (curr_turn == 'white' and utility < best_utility):
+            best_utility = utility
+            best_move = move
+
+    depth = 1
+    while (time.time() - start_time) < max_time and depth < 3:
+        try:
+            await asyncio.wait_for(search_depth(depth), timeout=max_time - (time.time() - start_time))
+        except asyncio.TimeoutError:
+            print(f"Timeout reached at depth {depth}")
+            break  # Time limit reached, break out of the loop
+        depth += 1
+
+    if best_move is None:
+        # Fallback to random move if no move was found within the time limit
+        available_moves = [coord for label, hex_list in hexes_by_label.items() for coord, _ in hex_list if _['owner'] is None]
+        best_move = random.sample(available_moves, 1)
+        print(f"Fallback to random move: {best_move}")
+
+    return best_utility, best_move
+
 
 # hexes_by_label: available hexes to choose from grouped by label
 # current_board: copy of the game board
@@ -531,8 +598,8 @@ def generate_possible_moves_singlethread(hexes_by_label, curr_board, player_colo
                 combinations = itertools.combinations(hex_list, label_int)
 
             for combination in combinations:
-                # continuous_neighbors = count_continuous_neighbors([hex_info[0] for hex_info in combination])
-                continuous_neighbors = random.randint(0, 6)
+                continuous_neighbors = count_continuous_neighbors([hex_info[0] for hex_info in combination])
+                # continuous_neighbors = random.randint(0, 6)
                 if label_int == 5 and len(hexes_by_label[label]) > 15:
                     if continuous_neighbors < 3:
                         continue
@@ -580,61 +647,94 @@ def min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth,
     if remaining_depth == 0:
         return evaluate_board_position(curr_board, me_player_black, game_round_number), []
 
+    best_moves = []
     if max_mode:
-        best_moves = []
         best_utility = float('-inf')
-        possible_moves = []
-        print("max: generate possible moves...")
-        before = time.time()
-        # generate the possible moves (leaves)
-        possible_moves = generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number)
-        print('max: generated possible moves: ' + str(len(possible_moves)))
-        random.shuffle(possible_moves)
-        after = time.time()
-        print('max: generate possible moves time: ' + str(after - before))
-
-        for hexes_by_label_copy, board_copy, combination in possible_moves:
-
-            utility, moves = min_max_search(
-                hexes_by_label_copy, board_copy, me_player_black, remaining_depth - 1, alpha, beta, not max_mode, game_round_number)
-
-            moves = tuple([hex_info[0] for hex_info in combination])
-
-            if utility > best_utility:
-                best_utility = utility
-                best_moves = moves
-            alpha = max(alpha, utility)
-            if beta <= alpha:
-                break
-
-        return best_utility, best_moves
     else:
-        best_moves = []
         best_utility = float('inf')
-        possible_moves = []
-        print("min: generate possible moves...")
-        before = time.time()
-        # generate the possible moves (leaves)
-        possible_moves = generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number)
-        after = time.time()
-        print('min: generate possible moves time: ' + str(after - before))
-        random.shuffle(possible_moves)
-        print('min: generated possible moves: ' + str(len(possible_moves)))
-        for hexes_by_label_copy, board_copy, combination in possible_moves:
-            # Evaluate the board position
+    # possible_moves = []
+    # print("max: generate possible moves...")
+    # before = time.time()
+    # # generate the possible moves (leaves)
+    # possible_moves = generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number)
+    # print('max: generated possible moves: ' + str(len(possible_moves)))
+    # random.shuffle(possible_moves)
+    # after = time.time()
+    # print('max: generate possible moves time: ' + str(after - before))
+
+    for label in list(hexes_by_label.keys()):
+        hex_list = hexes_by_label[label]
+        label_int = int(label)
+
+        if len(hex_list) < label_int:
+            combinations = [hex_list]
+        else:
+            combinations = itertools.combinations(hex_list, label_int)
+
+        for combination in combinations:
+            continuous_neighbors = count_continuous_neighbors([hex_info[0] for hex_info in combination])
+            # # continuous_neighbors = random.randint(0, 6)
+            if label_int == 5 and len(hexes_by_label[label]) > 15:
+                if continuous_neighbors < 3:
+                    continue
+            
+            if label_int == 2 and game_round_number < 10:
+                if continuous_neighbors < 2:
+                    continue
+
+            if game_round_number < 30:
+                if continuous_neighbors < label_int-1:
+                    continue
+            
+            # board_copy = copy.deepcopy(curr_board)
+            # hexes_by_label_copy = copy.deepcopy(hexes_by_label)
+            board_copy = curr_board
+            hexes_by_label_copy = hexes_by_label
+
+            for hex_info in combination:
+                board_copy[hex_info[0]]['owner'] = player_color
+
+            for hex_info in combination:
+                hexes_by_label_copy[label].remove(hex_info)
+
             utility, moves = min_max_search(
                 hexes_by_label_copy, board_copy, me_player_black, remaining_depth - 1, alpha, beta, not max_mode, game_round_number)
 
-            moves = tuple([hex_info[0] for hex_info in combination])
+            for hex_info in combination:
+                board_copy[hex_info[0]]['owner'] = None
 
-            if utility < best_utility:
-                best_utility = utility
+            for hex_info in combination:
+                hexes_by_label_copy[label].append(hex_info)
+
+            if utility == best_utility and random.random() < 0.5:
+                moves = tuple([hex_info[0] for hex_info in combination])
                 best_moves = moves
-            beta = min(beta, utility)
+
+            if max_mode:
+                if utility > best_utility:
+                    moves = tuple([hex_info[0] for hex_info in combination])
+
+                    best_utility = utility
+                    best_moves = moves
+                alpha = max(alpha, utility)
+            else:
+                if utility < best_utility:
+                    moves = tuple([hex_info[0] for hex_info in combination])
+
+                    best_utility = utility
+                    best_moves = moves
+                beta = min(beta, utility)
             if beta <= alpha:
                 break
 
-        return best_utility, best_moves
+    # if max_mode:
+    #     print ("max: best utility: " + str(best_utility) + " best moves: " + str(best_moves))
+    # else:
+    #     print ("min: best utility: " + str(best_utility) + " best moves: " + str(best_moves))
+
+    return best_utility, best_moves
+
+
 
 
 def get_neighbors(coord):
