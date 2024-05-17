@@ -453,11 +453,21 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
         }
         if available_labels:
             me_player_black = curr_turn == 'black'
-            best_move = min_max_search(copy.deepcopy(hexes_by_label), copy.deepcopy(
-                hexagon_board), me_player_black, 1, max_mode=True, curr_turn=curr_turn)
+
+            # minimize the game board object
+            # hexagon_board is a list of {'x': 261.43593539448983, 'y': 60.0, 'label': 6, 'selected': False, 'owner': None}
+            board_copy = copy.deepcopy(hexagon_board)
+            board_copy = {pos: {
+                'label': info['label'], 'owner': info['owner']} for pos, info in board_copy.items()}
+            hexes_by_label_copy = {
+                label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in hexes_by_label.items()
+            }
+
+            best_move = min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, float(
+                '-inf'), float('inf'), max_mode=True, game_round_number=curr_round)
             print("choose move with best utility: " + str(best_move))
             selected_hexes.extend([(hex, hexagon_board[hex])
-                                  for hex in hexagon_board.keys() if hex in best_move])
+                                  for hex in hexagon_board.keys() if hex in best_move[1]])
 
         print(curr_round)
     return selected_hexes
@@ -466,8 +476,48 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
 # current_board: copy of the game board
 # current_turn : 'black' or 'white'
 
+def generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number):
+    possible_moves = []
+    combinations_cache = {}
 
-def min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth, max_mode, curr_turn):
+    def process_combination(label, combination):
+        coordinates = [hex_info[0] for hex_info in combination]
+        continuous_neighbors = count_continuous_neighbors(coordinates)   
+        if (label == 5 and len(hexes_by_label[label]) > 15 and continuous_neighbors < 3):
+            return
+
+        board_copy = copy.deepcopy(curr_board)
+        hexes_by_label_copy = copy.deepcopy(hexes_by_label)
+
+        for hex_info in combination:
+            board_copy[hex_info[0]]['owner'] = player_color
+            board_copy[hex_info[0]]['selected'] = True
+
+        for hex_info in combination:
+            hexes_by_label_copy[label].remove(hex_info)
+
+        possible_moves.append((hexes_by_label_copy, board_copy, combination))
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for label in list(hexes_by_label.keys()):
+            hex_list = hexes_by_label[label]
+            label_int = int(label)
+
+            if label not in combinations_cache:
+                if len(hex_list) < label_int:
+                    combinations_cache[label] = [hex_list]
+                else:
+                    combinations_cache[label] = list(itertools.combinations(hex_list, label_int))
+
+            for combination in combinations_cache[label]:
+                futures.append(executor.submit(process_combination, label_int, combination))
+
+        concurrent.futures.wait(futures)
+
+    return possible_moves
+
+def min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
     """
     Performs a min-max search on the game tree to evaluate possible moves.
 
@@ -481,67 +531,67 @@ def min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth,
     Returns:
         Utility of the game position.
     """
-    # evaluate possible moves:
-    # 1. Split by possible labels to choose, then split by all possible moves
-    # create a game tree, evaluate every possible
-    # Iterative-deepening: when time is up, return the move selected by the deepest searc
-    # Dictionary mapping list of moves to utility
 
     curr_player_black = me_player_black ^ (not max_mode)
+    player_color = 'black' if curr_player_black else 'white'
 
     if remaining_depth == 0:
-        return evaluate_board_position(curr_board, me_player_black, curr_turn)
-    move_utilities = {}
-    for label in list(hexes_by_label.keys()):
-        execute_label_counter = 0
-        hex_list = hexes_by_label[label]
-        label_int = int(label)
+        return evaluate_board_position(curr_board, me_player_black, game_round_number), []
 
-        if len(hex_list) < label_int:
-            combinations = [hex_list]
-        else:
-            combinations = itertools.combinations(hex_list, label_int)
+    if max_mode:
+        best_moves = []
+        best_utility = float('-inf')
+        possible_moves = []
+        print("max: generate possible moves...")
+        before = time.time()
+        # generate the possible moves (leaves)
+        possible_moves = generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number)
+        print('max: generated possible moves: ' + str(len(possible_moves)))
+        random.shuffle(possible_moves)
+        after = time.time()
+        print('max: generate possible moves time: ' + str(after - before))
 
-        for combination in combinations:
-            if label == 5 and len(hexes_by_label[label]) > 15:
-                coordinates = [hex_info[0] for hex_info in combination]
-                if count_continuous_neighbors(coordinates) < 3:
-                    continue
+        for hexes_by_label_copy, board_copy, combination in possible_moves:
 
-            # Create a copy of the current board
-            board_copy = copy.deepcopy(curr_board)
-            hexes_by_label_copy = copy.deepcopy(hexes_by_label)
-            # Update the board with the selected hexes
-            color = 'black' if curr_player_black else 'white'
+            utility, moves = min_max_search(
+                hexes_by_label_copy, board_copy, me_player_black, remaining_depth - 1, alpha, beta, not max_mode, game_round_number)
 
-            for hex_info in combination:
-                board_copy[hex_info[0]]['owner'] = color
-                board_copy[hex_info[0]]['selected'] = True
+            moves = tuple([hex_info[0] for hex_info in combination])
 
-            # Update the hexes_by_label_copy by removing the selected hexes
-            for hex_info in combination:
-                hexes_by_label_copy[label].remove(hex_info)
+            if utility > best_utility:
+                best_utility = utility
+                best_moves = moves
+            alpha = max(alpha, utility)
+            if beta <= alpha:
+                break
 
+        return best_utility, best_moves
+    else:
+        best_moves = []
+        best_utility = float('inf')
+        possible_moves = []
+        print("min: generate possible moves...")
+
+        # generate the possible moves (leaves)
+        possible_moves = generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number)
+
+        random.shuffle(possible_moves)
+        print('min: generated possible moves: ' + str(len(possible_moves)))
+        for hexes_by_label_copy, board_copy, combination in possible_moves:
             # Evaluate the board position
-            utility = min_max_search(
-                hexes_by_label_copy, board_copy, me_player_black, remaining_depth - 1, not max_mode, curr_turn)
+            utility, moves = min_max_search(
+                hexes_by_label_copy, board_copy, me_player_black, remaining_depth - 1, alpha, beta, not max_mode, game_round_number)
 
-            # Update the utility value for the current label
-            move_tuple = tuple([hex_info[0] for hex_info in combination])
-            move_utilities[move_tuple] = utility
-            execute_label_counter += 1
-        print(f"Label {label} executed {execute_label_counter} times")
+            moves = tuple([hex_info[0] for hex_info in combination])
 
-        if max_mode:
-            max_utility = max(move_utilities.values())
-            best_moves = [
-                move for move, utility in move_utilities.items() if utility == max_utility]
-        else:
-            min_utility = min(move_utilities.values())
-            best_moves = [
-                move for move, utility in move_utilities.items() if utility == min_utility]
+            if utility < best_utility:
+                best_utility = utility
+                best_moves = moves
+            beta = min(beta, utility)
+            if beta <= alpha:
+                break
 
-    return random.choice(best_moves)
+        return best_utility, best_moves
 
 
 def get_neighbors(coord):
@@ -630,8 +680,8 @@ def count_hexagons_of(player_black):
 # print(are_neighbors(coord1, coord3))  # Output: False
 
 
-def evaluate_board_position(curr_board, player_black, curr_turn):
-    # calculate the utility of the board position for player curr_turn
+def evaluate_board_position(curr_board, player_black, game_round_number):
+    # calculate the utility of the board position for player player_black
     # own_connected_area = count_connected_area(curr_board, 'black')
     # enemy_connected_area = count_connected_area(curr_board, 'white')
     # if not player_black:
@@ -642,7 +692,7 @@ def evaluate_board_position(curr_board, player_black, curr_turn):
     enemy_connected_area = count_connected_area(curr_board, enemy_color)
     own_total_area = count_hexagons_of(player_black)
     enemy_total_area = count_hexagons_of(not player_black)
-    connected_factor = curr_turn * 0.1
+    connected_factor = game_round_number * 0.1
 
     return (own_connected_area - enemy_connected_area) * connected_factor + own_total_area - enemy_total_area
 
@@ -764,9 +814,6 @@ def main(black_player, white_player):
                         else:
                             hexes_by_label[label] = [(pos, info)]
 
-                # Randomly select a specified number of hexes from those filtered by label
-                # selected_hexes = select_hexes_by_random(
-                #     hexes_by_label, current_round)
                 selected_hexes = select_hexes_by_ai(
                     hexes_by_label, current_round, current_turn)
 
@@ -856,12 +903,12 @@ def main(black_player, white_player):
 
 
 if __name__ == "__main__":
-    sys.argv.append('ai')
     sys.argv.append('random')
+    sys.argv.append('ai')
     if len(sys.argv) != 3:
         print("Usage: python main.py [player1_type] [player2_type]")
         print("player1_type and player2_type should be 'human' or 'random'")
-        sys.exit(1)  # Exit the script with an error code
+        sys.exit(1)
 
     main(sys.argv[1], sys.argv[2])
     # main('random', 'random')
