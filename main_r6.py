@@ -469,9 +469,11 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             hexes_by_label_copy = {
                 label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in hexes_by_label.items()
             }
-
+            start_time = time.time()
             best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, float(
                 '-inf'), float('inf'), max_mode=True, game_round_number=curr_round)
+            end_time = time.time()
+            print("Time taken: " + str(end_time - start_time))
             # best_move = iterative_deepening(hexes_by_label_copy, board_copy, me_player_black, 8, curr_turn, curr_round)
             # best_move = asyncio.run(iterative_deepening(hexes_by_label_copy, board_copy, me_player_black, 8, curr_turn, curr_round))
             print("choose move with best utility: " + str(best_move))
@@ -668,7 +670,7 @@ if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
     if mp.current_process().name == 'MainProcess':
         import pygame
-        print("process name: ", mp.current_process().name)
+        # print("process name: ", mp.current_process().name)
         sys.argv.append('random')
         sys.argv.append('ai')
         if len(sys.argv) != 3:

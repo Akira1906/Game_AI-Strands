@@ -7,12 +7,15 @@ import sys
 import time
 import timeit
 import concurrent.futures
-from multiprocessing import Process, freeze_support, set_start_method, Pool
+from multiprocessing import Process, freeze_support, set_start_method, Pool, cpu_count
 import threading
 import asyncio
+import psutil
+from memory_profiler import profile
+import tracemalloc
 
 
-def iterative_deepening_futures(hexes_by_label, curr_board, me_player_black, max_time, curr_turn, game_round_number):
+def iterative_deepening_futures(hexes_by_label, curr_board, is_me_player_black, max_time, curr_turn, game_round_number):
     start_time = time.time()
     best_move = None
     best_utility = float('-inf') if curr_turn == 'black' else float('inf')
@@ -24,7 +27,7 @@ def iterative_deepening_futures(hexes_by_label, curr_board, me_player_black, max
     while not time_limit_reached():
         print(f"Starting search at depth {depth}")
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(min_max_search, hexes_by_label, curr_board, me_player_black, depth, float(
+            future = executor.submit(min_max_search, hexes_by_label, curr_board, is_me_player_black, depth, float(
                 '-inf'), float('inf'), curr_turn == 'black', game_round_number)
             try:
                 utility, move = future.result(
@@ -49,7 +52,7 @@ def iterative_deepening_futures(hexes_by_label, curr_board, me_player_black, max
     return best_utility, best_move
 
 
-async def iterative_deepening(hexes_by_label, curr_board, me_player_black, max_time, curr_turn, game_round_number):
+async def iterative_deepening(hexes_by_label, curr_board, is_me_player_black, max_time, curr_turn, game_round_number):
     start_time = time.time()
     best_move = None
     best_utility = float('-inf')
@@ -57,7 +60,7 @@ async def iterative_deepening(hexes_by_label, curr_board, me_player_black, max_t
     async def search_depth(depth):
         nonlocal best_move, best_utility
         print(f"Starting search at depth {depth}")
-        utility, move = min_max_search(hexes_by_label, curr_board, me_player_black, depth, float(
+        utility, move = min_max_search(hexes_by_label, curr_board, is_me_player_black, depth, float(
             '-inf'), float('inf'), curr_turn == 'black', game_round_number)
         print(f"Depth {depth} completed: utility={utility}, move={move}")
         if (curr_turn == 'black' and utility > best_utility) or (curr_turn == 'white' and utility < best_utility):
@@ -144,16 +147,8 @@ def generate_possible_moves_singlethread(hexes_by_label, curr_board, player_colo
             combinations = itertools.combinations(hex_list, label_int)
 
         for combination in combinations:
-            continuous_neighbors = count_continuous_neighbors(
-                [hex_info[0] for hex_info in combination])
-            # continuous_neighbors = random.randint(0, 6)
-            if label_int == 5 and len(hexes_by_label[label]) > 15:
-                if continuous_neighbors < 3:
-                    continue
-
-            if game_round_number < 5:
-                if continuous_neighbors < label_int:
-                    continue
+            if not is_promising_move(len(hexes_by_label[label]), combination, game_round_number, label_int):
+                continue
 
             board_copy = copy.deepcopy(curr_board)
             hexes_by_label_copy = copy.deepcopy(hexes_by_label)
@@ -166,22 +161,41 @@ def generate_possible_moves_singlethread(hexes_by_label, curr_board, player_colo
                 hexes_by_label_copy[label].remove(hex_info)
 
             possible_moves.append(
-                (hexes_by_label_copy, board_copy, combination))
+                (hexes_by_label_copy, board_copy))
+    print(f"Generated {len(possible_moves)} first level branches")
     return possible_moves
 
 
-def generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number):
+def generate_promising_moves(hexes_by_label, curr_board, player_color, game_round_number):
     return generate_possible_moves_singlethread(hexes_by_label, curr_board, player_color, game_round_number)
 
+def gen_combinations(iterable, r):
+    pool = tuple(iterable)
+    n = len(pool)
+    if r > n:
+        return
+    indices = list(range(r))
+    yield tuple(pool[i] for i in indices)
+    while True:
+        for i in reversed(range(r)):
+            if indices[i] != i + n - r:
+                break
+        else:
+            return
+        indices[i] += 1
+        for j in range(i+1, r):
+            indices[j] = indices[j-1] + 1
+        yield tuple(pool[i] for i in indices)
 
-def recursive_min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
+
+def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
     """
     Performs a min-max search on the game tree to evaluate possible moves.
 
     Args:
         hexes_by_label (dict): Available hexes to choose from grouped by label.
         curr_board (dict): Copy of the game board.
-        me_player_black (bool): Indicates if the current player is black.
+        is_me_player_black (bool): Indicates if the current player is black.
         remaining_depth (int): Remaining depth of the search.
         max_mode (bool): Indicates if it's the max player's turn.
 
@@ -189,71 +203,48 @@ def recursive_min_max_search(hexes_by_label, curr_board, me_player_black, remain
         Utility of the game position.
     """
 
-    curr_player_black = me_player_black ^ (not max_mode)
-    player_color = 'black' if curr_player_black else 'white'
+    is_curr_player_black = is_me_player_black ^ (not max_mode)
+    player_color = 'black' if is_curr_player_black else 'white'
 
     if remaining_depth == 0:
-        return evaluate_board_position(curr_board, me_player_black, game_round_number), []
+        return evaluate_board_position(curr_board, is_me_player_black, game_round_number), []
 
     best_moves = []
     if max_mode:
         best_utility = float('-inf')
     else:
         best_utility = float('inf')
-    # possible_moves = []
-    # print("max: generate possible moves...")
-    # before = time.time()
-    # # generate the possible moves (leaves)
-    # possible_moves = generate_possible_moves(hexes_by_label, curr_board, player_color, game_round_number)
-    # print('max: generated possible moves: ' + str(len(possible_moves)))
-    # random.shuffle(possible_moves)
-    # after = time.time()
-    # print('max: generate possible moves time: ' + str(after - before))
 
-    for label in list(hexes_by_label.keys()):
+    for label in hexes_by_label.keys():
         hex_list = hexes_by_label[label]
         label_int = int(label)
+        # print("hex_list: " + str(hex_list) + " label: " + str(label_int))
+
 
         if len(hex_list) < label_int:
             combinations = [hex_list]
         else:
-            combinations = itertools.combinations(hex_list, label_int)
+            combinations = gen_combinations(hex_list, label_int)
 
         for combination in combinations:
-            continuous_neighbors = count_continuous_neighbors(
-                [hex_info[0] for hex_info in combination])
-            # # continuous_neighbors = random.randint(0, 6)
-            if label_int == 5 and len(hexes_by_label[label]) > 15:
-                if continuous_neighbors < 3:
-                    continue
-
-            if label_int == 2 and game_round_number < 10:
-                if continuous_neighbors < 2:
-                    continue
-
-            if game_round_number < 30:
-                if continuous_neighbors < label_int-1:
-                    continue
-
-            # board_copy = copy.deepcopy(curr_board)
-            # hexes_by_label_copy = copy.deepcopy(hexes_by_label)
-            board_copy = curr_board
-            hexes_by_label_copy = hexes_by_label
+            # print("combination: " + str(combination))
+            if not is_promising_move(len(hexes_by_label[label]), combination, game_round_number, label_int):
+                continue
 
             for hex_info in combination:
-                board_copy[hex_info[0]]['owner'] = player_color
+                curr_board[hex_info[0]]['owner'] = player_color
 
             for hex_info in combination:
-                hexes_by_label_copy[label].remove(hex_info)
+                hexes_by_label[label].remove(hex_info)
 
             utility, moves = recursive_min_max_search(
-                hexes_by_label_copy, board_copy, me_player_black, remaining_depth - 1, alpha, beta, not max_mode, game_round_number)
+                hexes_by_label, curr_board, is_me_player_black, remaining_depth - 1, alpha, beta, not max_mode, game_round_number + 1)
 
             for hex_info in combination:
-                board_copy[hex_info[0]]['owner'] = None
+                curr_board[hex_info[0]]['owner'] = None
 
             for hex_info in combination:
-                hexes_by_label_copy[label].append(hex_info)
+                hexes_by_label[label].append(hex_info)
 
             if utility == best_utility and random.random() < 0.5:
                 moves = tuple([hex_info[0] for hex_info in combination])
@@ -284,32 +275,94 @@ def recursive_min_max_search(hexes_by_label, curr_board, me_player_black, remain
     return best_utility, best_moves
 
 
-def init_min_max_search(hexes_by_label, curr_board, me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
-    # curr_player_black = me_player_black ^ (not max_mode)
-    # player_color = 'black' if curr_player_black else 'white'
+def is_promising_move(len_fields_of_label, move, game_round_number, label):
+    continuous_neighbors, cluster_dimension = count_continuous_neighbors_and_length(
+        [hex_info[0] for hex_info in move])
+    # MAX: 34 rounds
+    # start phase: 0-10
+    # mid phase: 10-20
+    # end phase: 20-34
+    early_start_phase = 5
+    start_phase = 10
+    mid_phase = 20
+    end_phase = 34
+
+    if game_round_number < early_start_phase:
+        if label in [1, 2, 3] and continuous_neighbors < label:
+            return False
+        if label == 5 and continuous_neighbors < 4:
+            return False
+
+    if game_round_number < start_phase:
+        if label in [2, 3, 5] and continuous_neighbors < label:
+            return False
+
+    if game_round_number < mid_phase:
+        if label == 2 and len_fields_of_label > 10:
+            if continuous_neighbors < 2:
+                return False
+            
+        if label == 3 and len_fields_of_label > 10:
+            if cluster_dimension < 3 and continuous_neighbors < 2:
+                return False
+
+        if label == 5 and len_fields_of_label > 15:
+            if cluster_dimension < 4 and continuous_neighbors < 4:
+                return False
+
+    # if label == 6:
+    #     return True
+    return True
+
+def start_thread(memory_debug, hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
+    if (memory_debug): tracemalloc.start()
+    move = recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number)
+    # Stop tracing and get the current, peak and cumulative memory usage
+    if (memory_debug): 
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+    else:
+        peak = -1
+    # print(f"Peak memory usage is {peak / 10**6}MB")
+    return move, peak
+
+def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
+    # is_curr_player_black = is_me_player_black ^ (not max_mode)
+    # player_color = 'black' if is_curr_player_black else 'white'
+    memory_debug = True
 
     if remaining_depth == 0:
         print("error: remaining depth is 0 at init")
     if not max_mode:
         print("error: max mode is false at init")
-    # TODO: put the logic to decide whether move is worth or not into external function
 
-    #set number of processes
-    number_of_processes = 40
+    # set number of processes
+    number_of_processes = 15 # cpu_count() - 6
+    # print("number of processes: " + str(number_of_processes))
+    # generate sub tasks for the processes
 
-    #generate sub tasks for the processes
-    possible_moves = generate_possible_moves(
-        hexes_by_label, curr_board, me_player_black, game_round_number)
-    random.shuffle(possible_moves)
-    # chunk_size = len(possible_moves) // number_of_processes + 1 #TODO experiment with smaller chunk size
-    # moves_chunks = [possible_moves[i:i+chunk_size]
-    #                 for i in range(0, len(possible_moves), chunk_size)]
+    promising_moves = generate_promising_moves(
+        hexes_by_label, curr_board, is_me_player_black, game_round_number)
+    random.shuffle(promising_moves)
 
-    with Pool(processes= number_of_processes) as pool:
-        moves = pool.starmap(recursive_min_max_search, [(hex, board, me_player_black, remaining_depth-1, alpha, beta, not max_mode, game_round_number)
-                                for hex, board, comb in possible_moves])
+    # monitoring_thread = threading.Thread(target=monitor_memory, daemon=True)
+    # monitoring_thread.start()
 
+    with Pool(processes=number_of_processes) as pool:
+        results = pool.starmap(start_thread, [(memory_debug, hex, board, is_me_player_black, remaining_depth-1, alpha, beta, not max_mode, game_round_number + 1)
+                                                        for hex, board in promising_moves])
+    # monitoring_thread.terminate()
+    moves, memory_usages = zip(*results)
+    print("Memory usage of all processes: " + str(sum(memory_usages)))
+    print("Average memory usage of processes: " + str(sum(memory_usages) / len(memory_usages)))
     return max(moves, key=lambda x: x[0])
+
+def monitor_memory(interval=10):
+    while True:
+        process = psutil.Process(os.getpid())
+        memory_info = process.memory_info()
+        print(f"Memory Usage: RSS={memory_info.rss / (1024 * 1024):.2f} MB")
+        time.sleep(interval)
 
 def get_neighbors(coord):
     """
@@ -324,6 +377,52 @@ def get_neighbors(coord):
     # Define the six possible relative positions of neighbors in a hexagonal grid
     neighbors = [(0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1), (1, 0)]
     return [(coord[0] + dx, coord[1] + dy) for dx, dy in neighbors]
+
+
+def count_continuous_neighbors_and_length(coordinates):
+    if not coordinates:
+        return 0, 0
+    coordinates_set = set(coordinates)
+    visited = set()
+
+    def flood_fill(coord):
+        stack = [coord]
+        cluster_size = 0
+        cluster = []
+        while stack:
+            current = stack.pop()
+            if current not in visited:
+                visited.add(current)
+                cluster_size += 1
+                cluster.append(current)
+                for neighbor in get_neighbors(current):
+                    if neighbor in coordinates_set and neighbor not in visited:
+                        stack.append(neighbor)
+        return cluster, cluster_size
+
+    max_cluster = []
+    max_cluster_size = 0
+    for coord in coordinates:
+        if coord not in visited:
+            cluster, cluster_size = flood_fill(coord)
+            if cluster_size > max_cluster_size:
+                max_cluster_size = cluster_size
+                max_cluster = cluster
+
+    x_coords = [x for x, y in max_cluster]
+    y_coords = [y for x, y in max_cluster]
+    try:
+        min_x, max_x = min(x_coords), max(x_coords)
+        min_y, max_y = min(y_coords), max(y_coords)
+        width = max_x - min_x + 1
+        height = max_y - min_y + 1
+        max_cluster_dimension = max(width, height)
+    except ValueError:
+        print("ValueError")
+        max_cluster_dimension = 0
+    
+
+    return max_cluster_size, max_cluster_dimension
 
 
 def count_continuous_neighbors(coordinates):
@@ -353,23 +452,6 @@ def count_continuous_neighbors(coordinates):
     return max_cluster_size
 
 
-def benchmark_count_continuous_neighbors():
-    coords = [(0, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]
-    return count_continuous_neighbors(coords)
-
-
-# Benchmark the function using timeit.timeit()
-# execution_time = timeit.timeit(
-#     benchmark_count_continuous_neighbors, number=40000)
-# print(f"Execution time for 10000 calls: {execution_time:.6f} seconds")
-# # Example usage:
-# coordinates = [(0, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]
-# print(count_continuous_neighbors(coordinates))  # Output: 6
-
-# coordinates2 = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1)]
-# print(count_continuous_neighbors(coordinates2))  # Output: 2 (since they don't form a continuous cluster)
-
-
 def are_neighbors(coord1, coord2):
     # Define the six possible relative positions of neighbors in a hexagonal grid
     neighbors = [(0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1), (1, 0)]
@@ -381,22 +463,13 @@ def are_neighbors(coord1, coord2):
     return relative_position in neighbors
 
 
-def count_hexagons_of(curr_board, player_black):
-    color = 'black' if player_black else 'white'
+def count_hexagons_of(curr_board, player_color):
     owner_count = 0
     for hex_info in curr_board.values():
         owner = hex_info['owner']
-        if owner is color:
+        if owner is player_color:
             owner_count += 1
     return owner_count
-
-# # Example usage:
-# coord1 = (0, 0)
-# coord2 = (0, 1)
-# print(are_neighbors(coord1, coord2))  # Output: True
-
-# coord3 = (1, 1)
-# print(are_neighbors(coord1, coord3))  # Output: False
 
 
 def evaluate_board_position(curr_board, player_black, game_round_number):
@@ -409,14 +482,11 @@ def evaluate_board_position(curr_board, player_black, game_round_number):
     enemy_color = 'white' if player_black else 'black'
     own_connected_area = count_connected_area(curr_board, color)
     enemy_connected_area = count_connected_area(curr_board, enemy_color)
-    own_total_area = count_hexagons_of(curr_board, player_black)
-    enemy_total_area = count_hexagons_of(curr_board, not player_black)
-    connected_factor = game_round_number * 0.1
+    own_total_area = count_hexagons_of(curr_board, color)
+    enemy_total_area = count_hexagons_of(curr_board, enemy_color)
+    connected_factor = game_round_number * 0.05
 
     return (own_connected_area - enemy_connected_area) * connected_factor + own_total_area - enemy_total_area
-
-# fix of the original calculate_connected_areas function
-#
 
 
 def count_connected_area(curr_board, player_color):
