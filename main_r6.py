@@ -434,6 +434,7 @@ def select_hexes_by_random(hexes_by_label, current_round):
                 selected_hexes.extend(available_hexes)
 
         print(current_round)
+        print("the random process picked: " + str(selected_hexes))
     return selected_hexes
 
 # hexes_by_label: available hexes to choose from grouped by label
@@ -466,13 +467,19 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             board_copy = copy.deepcopy(hexagon_board)
             board_copy = {pos: {
                 'label': info['label'], 'owner': info['owner']} for pos, info in board_copy.items()}
+            hexes_by_label_copy = copy.deepcopy(hexes_by_label)
             hexes_by_label_copy = {
-                label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in hexes_by_label.items()
+                label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in hexes_by_label_copy.items()
             }
             start_time = time.time()
-            best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, float(
-                '-inf'), float('inf'), max_mode=True, game_round_number=curr_round)
+            best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, max_mode=True, game_round_number=curr_round)
             end_time = time.time()
+
+            # Test area to determine the memory problem
+            # for i in range(10000):
+            #     best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, max_mode=True, game_round_number=curr_round)
+            #     print (i)
+
             print("Time taken: " + str(end_time - start_time))
             # best_move = iterative_deepening(hexes_by_label_copy, board_copy, me_player_black, 8, curr_turn, curr_round)
             # best_move = asyncio.run(iterative_deepening(hexes_by_label_copy, board_copy, me_player_black, 8, curr_turn, curr_round))
@@ -675,7 +682,7 @@ if __name__ == '__main__':
         sys.argv.append('ai')
         if len(sys.argv) != 3:
             print("Usage: python main.py [player1_type] [player2_type]")
-            print("player1_type and player2_type should be 'human' or 'random'")
+            print("player1_type and player2_type should be 'human', 'ai' or 'random'")
             sys.exit(1)
 
         main(sys.argv[1], sys.argv[2])

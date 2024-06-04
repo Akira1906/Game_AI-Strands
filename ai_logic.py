@@ -13,6 +13,7 @@ import asyncio
 import psutil
 from memory_profiler import profile
 import tracemalloc
+from multiprocessing import Value, Lock
 
 
 def iterative_deepening_futures(hexes_by_label, curr_board, is_me_player_black, max_time, curr_turn, game_round_number):
@@ -117,18 +118,18 @@ def generate_possible_moves_multithread(hexes_by_label, curr_board, player_color
         futures = []
         for label in list(hexes_by_label.keys()):
             hex_list = hexes_by_label[label]
-            label_int = int(label)
+            label = int(label)
 
             if label not in combinations_cache:
-                if len(hex_list) < label_int:
+                if len(hex_list) < label:
                     combinations_cache[label] = [hex_list]
                 else:
                     combinations_cache[label] = list(
-                        itertools.combinations(hex_list, label_int))
+                        itertools.combinations(hex_list, label))
 
             for combination in combinations_cache[label]:
                 futures.append(executor.submit(
-                    process_combination, label_int, combination))
+                    process_combination, label, combination))
 
         concurrent.futures.wait(futures)
 
@@ -139,15 +140,15 @@ def generate_possible_moves_singlethread(hexes_by_label, curr_board, player_colo
     possible_moves = []
     for label in list(hexes_by_label.keys()):
         hex_list = hexes_by_label[label]
-        label_int = int(label)
+        label = int(label)
 
-        if len(hex_list) < label_int:
+        if len(hex_list) < label:
             combinations = [hex_list]
         else:
-            combinations = itertools.combinations(hex_list, label_int)
+            combinations = itertools.combinations(hex_list, label)
 
         for combination in combinations:
-            if not is_promising_move(len(hexes_by_label[label]), combination, game_round_number, label_int):
+            if not is_promising_move(len(hexes_by_label[label]), combination, game_round_number, label):
                 continue
 
             board_copy = copy.deepcopy(curr_board)
@@ -155,18 +156,18 @@ def generate_possible_moves_singlethread(hexes_by_label, curr_board, player_colo
 
             for hex_info in combination:
                 board_copy[hex_info[0]]['owner'] = player_color
-                board_copy[hex_info[0]]['selected'] = True
 
             for hex_info in combination:
                 hexes_by_label_copy[label].remove(hex_info)
 
             possible_moves.append(
                 (hexes_by_label_copy, board_copy))
-    print(f"Generated {len(possible_moves)} first level branches")
+    
     return possible_moves
 
 
-def generate_promising_moves(hexes_by_label, curr_board, player_color, game_round_number):
+def generate_promising_moves(hexes_by_label, curr_board, is_player_black, game_round_number):
+    player_color = 'black' if is_player_black else 'white'
     return generate_possible_moves_singlethread(hexes_by_label, curr_board, player_color, game_round_number)
 
 def gen_combinations(iterable, r):
@@ -217,18 +218,18 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
 
     for label in hexes_by_label.keys():
         hex_list = hexes_by_label[label]
-        label_int = int(label)
-        # print("hex_list: " + str(hex_list) + " label: " + str(label_int))
+        label = int(label)
+        # print("hex_list: " + str(hex_list) + " label: " + str(label))
 
 
-        if len(hex_list) < label_int:
+        if len(hex_list) < label:
             combinations = [hex_list]
         else:
-            combinations = gen_combinations(hex_list, label_int)
+            combinations = gen_combinations(hex_list, label)
 
         for combination in combinations:
             # print("combination: " + str(combination))
-            if not is_promising_move(len(hexes_by_label[label]), combination, game_round_number, label_int):
+            if not is_promising_move(len(hexes_by_label[label]), combination, game_round_number, label):
                 continue
 
             for hex_info in combination:
@@ -246,9 +247,9 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
             for hex_info in combination:
                 hexes_by_label[label].append(hex_info)
 
-            if utility == best_utility and random.random() < 0.5:
-                moves = tuple([hex_info[0] for hex_info in combination])
-                best_moves = moves
+            # if utility >= best_utility and random.random() < 0.5:
+            #     moves = tuple([hex_info[0] for hex_info in combination])
+            #     best_moves = moves
 
             if max_mode:
                 if utility > best_utility:
@@ -290,33 +291,40 @@ def is_promising_move(len_fields_of_label, move, game_round_number, label):
     if game_round_number < early_start_phase:
         if label in [1, 2, 3] and continuous_neighbors < label:
             return False
-        if label == 5 and continuous_neighbors < 4:
+        elif label == 5 and continuous_neighbors < 4:
             return False
 
-    if game_round_number < start_phase:
-        if label in [2, 3, 5] and continuous_neighbors < label:
+    elif game_round_number < start_phase:
+        if label in [2, 3] and continuous_neighbors < label:
+            return False
+        elif label == 5 and continuous_neighbors < 3:
             return False
 
-    if game_round_number < mid_phase:
+    elif game_round_number < mid_phase:
         if label == 2 and len_fields_of_label > 10:
             if continuous_neighbors < 2:
                 return False
             
-        if label == 3 and len_fields_of_label > 10:
-            if cluster_dimension < 3 and continuous_neighbors < 2:
+        elif label == 3 and len_fields_of_label > 10:
+            if cluster_dimension < 3 and continuous_neighbors < 3:
                 return False
 
-        if label == 5 and len_fields_of_label > 15:
-            if cluster_dimension < 4 and continuous_neighbors < 4:
-                return False
+        # elif label == 5 and len_fields_of_label > 15:
+        #     if cluster_dimension < 4 and continuous_neighbors < 4:
+        #         return False
 
     # if label == 6:
     #     return True
     return True
 
-def start_thread(memory_debug, hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
+def start_thread(memory_debug, hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number, lock):
     if (memory_debug): tracemalloc.start()
-    move = recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number)
+
+    with lock:
+        local_alpha = alpha.value
+        local_beta = beta.value
+
+    move = recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, local_alpha, local_beta, max_mode, game_round_number)
     # Stop tracing and get the current, peak and cumulative memory usage
     if (memory_debug): 
         current, peak = tracemalloc.get_traced_memory()
@@ -324,12 +332,20 @@ def start_thread(memory_debug, hexes_by_label, curr_board, is_me_player_black, r
     else:
         peak = -1
     # print(f"Peak memory usage is {peak / 10**6}MB")
+    # update global alpha and beta
+    with lock:
+        if max_mode:
+            alpha.value = max(alpha.value, move[0])
+        else:
+            beta.value = min(beta.value, move[0])
     return move, peak
 
-def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
+
+
+def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, max_mode, game_round_number):
     # is_curr_player_black = is_me_player_black ^ (not max_mode)
     # player_color = 'black' if is_curr_player_black else 'white'
-    memory_debug = True
+    memory_debug = False
 
     if remaining_depth == 0:
         print("error: remaining depth is 0 at init")
@@ -337,24 +353,46 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remainin
         print("error: max mode is false at init")
 
     # set number of processes
-    number_of_processes = 15 # cpu_count() - 6
+    number_of_processes = cpu_count() - 5
     # print("number of processes: " + str(number_of_processes))
     # generate sub tasks for the processes
-
+    # print all the variables at this point for debugging
+    # print("Starting min max search with depth: " + str(remaining_depth) + " and max mode: " + str(max_mode) + " and game round number: " + str(game_round_number))
+    print("hexes by label: " + str(sys.getsizeof(hexes_by_label)))
+    print("current board: " + str(sys.getsizeof(curr_board)))
+    print("is me player black: " + str(is_me_player_black))
     promising_moves = generate_promising_moves(
         hexes_by_label, curr_board, is_me_player_black, game_round_number)
     random.shuffle(promising_moves)
+    print(f"Generated {len(promising_moves)} first level branches")
+    # if memory_debug:
+    #     next_round_moves = generate_promising_moves(hexes_by_label, curr_board, is_me_player_black, game_round_number + 1)
+    #     print(f"Generated potential: {str(len(next_round_moves))} second level branches)")
+    #     next_round_moves = generate_promising_moves(hexes_by_label, curr_board, is_me_player_black, game_round_number + 2)
+    #     print(f"Generated potential: {str(len(next_round_moves))} third level branches")
 
     # monitoring_thread = threading.Thread(target=monitor_memory, daemon=True)
     # monitoring_thread.start()
 
-    with Pool(processes=number_of_processes) as pool:
-        results = pool.starmap(start_thread, [(memory_debug, hex, board, is_me_player_black, remaining_depth-1, alpha, beta, not max_mode, game_round_number + 1)
-                                                        for hex, board in promising_moves])
-    # monitoring_thread.terminate()
+    # if game_round_number >= 9:
+    #     memory_debug = True
+    #     promising_moves = promising_moves[:1]
+
+    from multiprocessing import Manager
+
+    # Create a Manager object
+    with Manager() as manager:
+        # Create Value and Lock objects using the Manager
+        alpha = manager.Value('d', -float('inf'))  # 'd' indicates a double precision float
+        beta = manager.Value('d', float('inf'))
+        lock = manager.Lock()
+
+        with Pool(processes=number_of_processes) as pool:
+            results = pool.starmap(start_thread, [(memory_debug, hex, board, is_me_player_black, remaining_depth - 1, alpha, beta, not max_mode, game_round_number + 1, lock)
+                                                            for hex, board in promising_moves])             
     moves, memory_usages = zip(*results)
-    print("Memory usage of all processes: " + str(sum(memory_usages)))
-    print("Average memory usage of processes: " + str(sum(memory_usages) / len(memory_usages)))
+    print(f"Memory usage of all processes: {sum(memory_usages)/ 10**6}MB ")
+    print(f"Average memory usage of processes: {(sum(memory_usages)/ len(memory_usages))/ 10**6}MB")
     return max(moves, key=lambda x: x[0])
 
 def monitor_memory(interval=10):
