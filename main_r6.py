@@ -501,7 +501,7 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             
 
             start_time = time.time()
-            best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, max_mode=True, game_round_number=curr_round)
+            best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 3, max_mode=True, game_round_number=curr_round)
             end_time = time.time()
 
             # Test area to determine the memory problem

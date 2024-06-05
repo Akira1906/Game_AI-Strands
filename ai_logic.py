@@ -273,13 +273,13 @@ def is_promising_move(len_fields_of_label, move, game_round_number, label):
     # start phase: 0-10
     # mid phase: 10-20
     # end phase: 20-34
-    early_start_phase = 5
+    early_start_phase = 4
     start_phase = 10
     mid_phase = 20
     end_phase = 34
 
     if game_round_number < early_start_phase:
-        if label in [1, 2, 3] and continuous_neighbors < label:
+        if label in [2, 3] and continuous_neighbors < label:
             return False
         elif label == 5 and continuous_neighbors < 4:
             return False
@@ -296,7 +296,7 @@ def is_promising_move(len_fields_of_label, move, game_round_number, label):
                 return False
             
         elif label == 3 and len_fields_of_label > 10:
-            if cluster_dimension < 3 and continuous_neighbors < 3:
+            if continuous_neighbors < 3:
                 return False
 
         # elif label == 5 and len_fields_of_label > 15:
@@ -324,7 +324,7 @@ def start_thread(hexes_by_label, curr_board, is_me_player_black, remaining_depth
     # print(f"Peak memory usage is {peak / 10**6}MB")
     # update global alpha and beta
     with lock:
-        if not max_mode:
+        if not max_mode: #inversed because we get max_mode as inversed
             alpha.value = max(alpha.value, best_move[0])
         else:
             beta.value = min(beta.value, best_move[0])
