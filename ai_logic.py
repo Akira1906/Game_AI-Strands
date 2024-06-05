@@ -7,7 +7,7 @@ import sys
 import time
 import timeit
 import concurrent.futures
-from multiprocessing import Process, freeze_support, set_start_method, Pool, cpu_count, Value, Lock, Manager
+from multiprocessing import Process, freeze_support, set_start_method, Pool, cpu_count, Value, Lock, Manager, TimeoutError
 import threading
 import asyncio
 from memory_profiler import profile
@@ -334,7 +334,7 @@ def start_thread(hexes_by_label, curr_board, is_me_player_black, remaining_depth
 
 def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, max_mode, game_round_number):
     memory_debug = False
-
+    start_time = time.time()
     if remaining_depth == 0:
         print("error: remaining depth is 0 at init")
     if not max_mode:
@@ -375,23 +375,55 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remainin
     #     memory_debug = True
     #     promising_moves = promising_moves[:1]
 
-    # Create a Manager object
-    with Manager() as manager:
-        # Create Value and Lock objects using the Manager
-        alpha = manager.Value('d', -float('inf'))  # 'd' indicates a double precision float
-        beta = manager.Value('d', float('inf'))
-        lock = manager.Lock()
+    #iterative deepening
+    TIMEOUT = 20
+    iteration_depth = 1
+    max_moves = []
+    while TIMEOUT - (time.time() - start_time) > 0:
+        local_start_time = time.time()
+        curr_timeout = TIMEOUT - (time.time() - start_time)
+        iteration_depth += 1
+        print(f"Iteration depth: {iteration_depth}, time left: {curr_timeout} seconds")
+        # Create a Manager object
+        with Manager() as manager:
+            # Create Value and Lock objects using the Manager
+            alpha = manager.Value('d', -float('inf'))  # 'd' indicates a double precision float
+            beta = manager.Value('d', float('inf'))
+            lock = manager.Lock()
 
-        with Pool(processes=number_of_processes) as pool:
-            results = pool.starmap(start_thread, 
-                                   [(hex, board, is_me_player_black, remaining_depth - 1, alpha,
-                                      beta, not max_mode, game_round_number + 1, lock, memory_debug)
-                                                            for hex, board in promising_moves])             
-    moves, memory_usages = zip(*results)
+            with Pool(processes=number_of_processes) as pool:
+                results =[pool.apply_async(start_thread, 
+                                            (hex, board, is_me_player_black, iteration_depth - 1, alpha,
+                                            beta, not max_mode, game_round_number + 1, lock, memory_debug)) for hex, board in promising_moves]
+                
+                time_to_wait = curr_timeout  # initial time to wait
+                for i, result in enumerate(results):
+                    try:
+                        return_value = result.get(time_to_wait)  # wait for up to time_to_wait seconds
+                    except TimeoutError:
+                        pass
+                        # print('Timeout for v = ', i)
+                    # else:
+                        # print(f'Return value for v = {i} is {return_value}')
+                    # how much time has expired since we began waiting?
+                    t = time.time() - local_start_time
+                    time_to_wait = curr_timeout - t
+                    if time_to_wait < 0:
+                        time_to_wait = 0
+                pool.terminate()  # all processes, busy or idle, will be terminated
+
+                results = [result.get() for result in results if result.ready()]
+                if results:
+                    moves, memory_usages = zip(*results)
+
+        max_moves.append(max(moves, key=lambda x: x[0]))
+    # TODO fix the return value of the function choose move with best utility: [(0.75, ((-5, 0), (-5, 5), (0, -5), (0, 5), (5, -5), (5, 0))), (0.75, ((-5, 0), (-5, 5), (0, -5), (0, 5), (5, -5), (5, 0))), (0.75, ((-5, 0), (-5, 5), (0, -5), (0, 5), (5, -5), (5, 0)))]
     if memory_debug:
         print(f"Memory usage of all processes: {sum(memory_usages)/ 10**6}MB ")
         print(f"Average memory usage of processes: {(sum(memory_usages)/ len(memory_usages))/ 10**6}MB")
-    return max(moves, key=lambda x: x[0])
+    # print(f"max moves: {max_moves}")
+    # print(f"max max moves: {max(max_moves, key=lambda x: x[0])}")
+    return max(max_moves, key=lambda x: x[0])
 
 def monitor_memory(interval=10):
     while True:
