@@ -205,12 +205,11 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
         Utility of the game position.
     """
 
-    is_curr_player_black = is_me_player_black ^ (not max_mode)
-    player_color = 'black' if is_curr_player_black else 'white'
-
     if remaining_depth == 0:
         return evaluate_board_position(curr_board, is_me_player_black, game_round_number), []
 
+    is_curr_player_black = is_me_player_black ^ (not max_mode)
+    curr_player_color = 'black' if is_curr_player_black else 'white'
     best_moves = []
     if max_mode:
         best_utility = float('-inf')
@@ -234,7 +233,7 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
                 continue
 
             for hex_field in move:
-                curr_board[hex_field[0]]['owner'] = player_color
+                curr_board[hex_field[0]]['owner'] = curr_player_color
             
             hexes_by_label[label] = [hex_field for hex_field in hexes_by_label[label] if hex_field not in move]
 
@@ -308,13 +307,13 @@ def is_promising_move(len_fields_of_label, move, game_round_number, label):
     #     return True
     return True
 
-def start_thread(memory_debug, hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number, lock):
+def start_thread(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number, lock, memory_debug):
     if (memory_debug): tracemalloc.start()
 
     with lock:
-        local_alpha = alpha.value
-        local_beta = beta.value
-
+         local_alpha = alpha.value
+    local_beta = float('inf')
+    # local_alpha = -float('inf')
     best_move = recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, local_alpha, local_beta, max_mode, game_round_number)
     # Stop tracing and get the current, peak and cumulative memory usage
     if (memory_debug):
@@ -325,7 +324,7 @@ def start_thread(memory_debug, hexes_by_label, curr_board, is_me_player_black, r
     # print(f"Peak memory usage is {peak / 10**6}MB")
     # update global alpha and beta
     with lock:
-        if max_mode:
+        if not max_mode:
             alpha.value = max(alpha.value, best_move[0])
         else:
             beta.value = min(beta.value, best_move[0])
@@ -352,7 +351,7 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remainin
     # print("is me player black: " + str(is_me_player_black))
     promising_moves = generate_promising_moves(
         hexes_by_label, curr_board, is_me_player_black, game_round_number)
-    import pickle
+    # import pickle
 
     # with open(f'promising_moves_{game_round_number}.pickle', 'wb') as f:
     #     pickle.dump(promising_moves, f) 
@@ -384,11 +383,14 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remainin
         lock = manager.Lock()
 
         with Pool(processes=number_of_processes) as pool:
-            results = pool.starmap(start_thread, [(memory_debug, hex, board, is_me_player_black, remaining_depth - 1, alpha, beta, not max_mode, game_round_number + 1, lock)
+            results = pool.starmap(start_thread, 
+                                   [(hex, board, is_me_player_black, remaining_depth - 1, alpha,
+                                      beta, not max_mode, game_round_number + 1, lock, memory_debug)
                                                             for hex, board in promising_moves])             
     moves, memory_usages = zip(*results)
-    print(f"Memory usage of all processes: {sum(memory_usages)/ 10**6}MB ")
-    print(f"Average memory usage of processes: {(sum(memory_usages)/ len(memory_usages))/ 10**6}MB")
+    if memory_debug:
+        print(f"Memory usage of all processes: {sum(memory_usages)/ 10**6}MB ")
+        print(f"Average memory usage of processes: {(sum(memory_usages)/ len(memory_usages))/ 10**6}MB")
     return max(moves, key=lambda x: x[0])
 
 def monitor_memory(interval=10):
@@ -507,11 +509,6 @@ def count_hexagons_of(curr_board, player_color):
 
 
 def evaluate_board_position(curr_board, player_black, game_round_number):
-    # calculate the utility of the board position for player player_black
-    # own_connected_area = count_connected_area(curr_board, 'black')
-    # enemy_connected_area = count_connected_area(curr_board, 'white')
-    # if not player_black:
-    #     own_connected_area, enemy_connected_area = enemy_connected_area, own_connected_area
     color = 'black' if player_black else 'white'
     enemy_color = 'white' if player_black else 'black'
     own_connected_area = count_connected_area(curr_board, color)

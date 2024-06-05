@@ -525,7 +525,7 @@ def check_timeout_and_autocomplete():
     if ((current_turn == 'black' and black_player_type == "human") or
             (current_turn == 'white' and white_player_type == "human")):
         # If the count exceeds 30, automatically complete the move.
-        if (current_time - start_time) > 30000:
+        if (current_time - start_time) > 60000:
             auto_select_remaining_hexes(current_label, required_selections)
             end_current_round()
             start_time = pygame.time.get_ticks()  # 重置起始時間
