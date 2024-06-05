@@ -5,9 +5,9 @@ import os
 import random
 import sys
 import time
-from ai_logic import init_min_max_search, iterative_deepening
+from ai_logic import init_min_max_search
 import multiprocessing as mp
-
+import pickle
 # Define static variables and hexagon properties
 BG_COLOR = (30, 30, 30)
 BLACK = (0, 0, 0)
@@ -434,13 +434,12 @@ def select_hexes_by_random(hexes_by_label, current_round):
                 selected_hexes.extend(available_hexes)
 
         print(current_round)
-        print("the random process picked: " + str(selected_hexes))
+        # print("the random process picked: " + str(selected_hexes))
     return selected_hexes
 
 # hexes_by_label: available hexes to choose from grouped by label
 # current_round: number of the round
 # current_turn : 'black' or 'white'
-
 
 def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
     """Selects hexes randomly based on the current round and label availability."""
@@ -471,6 +470,36 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             hexes_by_label_copy = {
                 label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in hexes_by_label_copy.items()
             }
+
+            # if curr_round >= 9:
+            #     with open(f"hexes_by_label_copy_{curr_round}.pickle", 'wb') as file:
+            #         # Serialize and save the object to the file
+            #         pickle.dump(hexes_by_label_copy, file)
+            #     with open(f"board_copy_{curr_round}.pickle", 'wb') as file:
+            #         # Serialize and save the object to the file
+            #         pickle.dump(board_copy, file)
+            #     with open(f"me_player_black_{curr_round}.pickle", 'wb') as file:
+            #         # Serialize and save the object to the file
+            #         pickle.dump(me_player_black, file)
+            
+            # test area to determine the memory problem
+            # load game state from pickle files
+            # with open('board_copy_12.pickle', 'rb') as f:
+            #     board_copy_12 = pickle.load(f)
+            # with open('hexes_by_label_copy_12.pickle', 'rb') as f:
+            #     hexes_by_label_copy_12 = pickle.load(f)
+            # with open('me_player_black_12.pickle', 'rb') as f:
+            #     me_player_black_12 = pickle.load(f)
+
+            # with open("board_copy_10.pickle", 'rb') as file:
+            #     board_copy_10 = pickle.load(file)
+            # with open("hexes_by_label_copy_10.pickle", 'rb') as file:
+            #     hexes_by_label_copy_10 = pickle.load(file)
+            # with open("me_player_black_10.pickle", 'rb') as file:
+            #     me_player_black_10 = pickle.load(file)
+
+            
+
             start_time = time.time()
             best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, max_mode=True, game_round_number=curr_round)
             end_time = time.time()
@@ -480,9 +509,7 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             #     best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, max_mode=True, game_round_number=curr_round)
             #     print (i)
 
-            print("Time taken: " + str(end_time - start_time))
-            # best_move = iterative_deepening(hexes_by_label_copy, board_copy, me_player_black, 8, curr_turn, curr_round)
-            # best_move = asyncio.run(iterative_deepening(hexes_by_label_copy, board_copy, me_player_black, 8, curr_turn, curr_round))
+            print("Time taken: " + str(end_time - start_time)+"s")
             print("choose move with best utility: " + str(best_move))
             selected_hexes.extend([(hex, hexagon_board[hex])
                                   for hex in hexagon_board.keys() if hex in best_move[1]])
@@ -512,7 +539,7 @@ def main(black_player, white_player):
 
     """Main game loop."""
     global selected_counts, current_label, current_turn, turn_ended, current_round, start_time, required_selections, black_player_type, white_player_type, remaining_hexes, hexagon_board, running
-    start_time = pygame.time.get_ticks()  # 記錄起始時間
+    start_time = pygame.time.get_ticks()  #
     running = True
     current_round = 1
     current_label = None  # Track the label selected in the current round

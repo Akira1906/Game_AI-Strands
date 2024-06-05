@@ -7,168 +7,169 @@ import sys
 import time
 import timeit
 import concurrent.futures
-from multiprocessing import Process, freeze_support, set_start_method, Pool, cpu_count
+from multiprocessing import Process, freeze_support, set_start_method, Pool, cpu_count, Value, Lock, Manager
 import threading
 import asyncio
-import psutil
 from memory_profiler import profile
 import tracemalloc
-from multiprocessing import Value, Lock
+import psutil
 
 
-def iterative_deepening_futures(hexes_by_label, curr_board, is_me_player_black, max_time, curr_turn, game_round_number):
-    start_time = time.time()
-    best_move = None
-    best_utility = float('-inf') if curr_turn == 'black' else float('inf')
-
-    def time_limit_reached():
-        return (time.time() - start_time) >= max_time
-
-    depth = 1
-    while not time_limit_reached():
-        print(f"Starting search at depth {depth}")
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(min_max_search, hexes_by_label, curr_board, is_me_player_black, depth, float(
-                '-inf'), float('inf'), curr_turn == 'black', game_round_number)
-            try:
-                utility, move = future.result(
-                    timeout=max_time - (time.time() - start_time))
-                print(
-                    f"Depth {depth} completed: utility={utility}, move={move}")
-                best_utility = utility
-                best_move = move
-            except concurrent.futures.TimeoutError:
-                print(f"Timeout reached at depth {depth}")
-                # Stop the future executor
-                break  # Time limit reached, break out of the loop
-        depth += 1
-
-    if best_move is None:
-        # Fallback to random move if no move was found within the time limit
-        available_moves = [coord for label, hex_list in hexes_by_label.items(
-        ) for coord, _ in hex_list if _['owner'] is None]
-        best_move = random.sample(available_moves, 1)
-        print(f"Fallback to random move: {best_move}")
-    print(f"Best move found: {best_move}")
-    return best_utility, best_move
 
 
-async def iterative_deepening(hexes_by_label, curr_board, is_me_player_black, max_time, curr_turn, game_round_number):
-    start_time = time.time()
-    best_move = None
-    best_utility = float('-inf')
+# def iterative_deepening_futures(hexes_by_label, curr_board, is_me_player_black, max_time, curr_turn, game_round_number):
+#     start_time = time.time()
+#     best_move = None
+#     best_utility = float('-inf') if curr_turn == 'black' else float('inf')
 
-    async def search_depth(depth):
-        nonlocal best_move, best_utility
-        print(f"Starting search at depth {depth}")
-        utility, move = min_max_search(hexes_by_label, curr_board, is_me_player_black, depth, float(
-            '-inf'), float('inf'), curr_turn == 'black', game_round_number)
-        print(f"Depth {depth} completed: utility={utility}, move={move}")
-        if (curr_turn == 'black' and utility > best_utility) or (curr_turn == 'white' and utility < best_utility):
-            best_utility = utility
-            best_move = move
+#     def time_limit_reached():
+#         return (time.time() - start_time) >= max_time
 
-    depth = 1
-    while (time.time() - start_time) < max_time and depth < 3:
-        try:
-            await asyncio.wait_for(search_depth(depth), timeout=max_time - (time.time() - start_time))
-        except asyncio.TimeoutError:
-            print(f"Timeout reached at depth {depth}")
-            break  # Time limit reached, break out of the loop
-        depth += 1
+#     depth = 1
+#     while not time_limit_reached():
+#         print(f"Starting search at depth {depth}")
+#         with concurrent.futures.ThreadPoolExecutor() as executor:
+#             future = executor.submit(min_max_search, hexes_by_label, curr_board, is_me_player_black, depth, float(
+#                 '-inf'), float('inf'), curr_turn == 'black', game_round_number)
+#             try:
+#                 utility, move = future.result(
+#                     timeout=max_time - (time.time() - start_time))
+#                 print(
+#                     f"Depth {depth} completed: utility={utility}, move={move}")
+#                 best_utility = utility
+#                 best_move = move
+#             except concurrent.futures.TimeoutError:
+#                 print(f"Timeout reached at depth {depth}")
+#                 # Stop the future executor
+#                 break  # Time limit reached, break out of the loop
+#         depth += 1
 
-    if best_move is None:
-        # Fallback to random move if no move was found within the time limit
-        available_moves = [coord for label, hex_list in hexes_by_label.items(
-        ) for coord, _ in hex_list if _['owner'] is None]
-        best_move = random.sample(available_moves, 1)
-        print(f"Fallback to random move: {best_move}")
-
-    return best_utility, best_move
-
-
-# hexes_by_label: available hexes to choose from grouped by label
-# current_board: copy of the game board
-# current_turn : 'black' or 'white'
-
-def generate_possible_moves_multithread(hexes_by_label, curr_board, player_color, game_round_number):
-    possible_moves = []
-    combinations_cache = {}
-
-    def process_combination(label, combination):
-        coordinates = [hex_info[0] for hex_info in combination]
-        continuous_neighbors = count_continuous_neighbors(coordinates)
-        if (label == 5 and len(hexes_by_label[label]) > 15 and continuous_neighbors < 3) or \
-           (game_round_number < 5 and continuous_neighbors < label):
-            return
-
-        board_copy = copy.deepcopy(curr_board)
-        hexes_by_label_copy = copy.deepcopy(hexes_by_label)
-
-        for hex_info in combination:
-            board_copy[hex_info[0]]['owner'] = player_color
-            board_copy[hex_info[0]]['selected'] = True
-
-        for hex_info in combination:
-            hexes_by_label_copy[label].remove(hex_info)
-
-        possible_moves.append((hexes_by_label_copy, board_copy, combination))
-
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = []
-        for label in list(hexes_by_label.keys()):
-            hex_list = hexes_by_label[label]
-            label = int(label)
-
-            if label not in combinations_cache:
-                if len(hex_list) < label:
-                    combinations_cache[label] = [hex_list]
-                else:
-                    combinations_cache[label] = list(
-                        itertools.combinations(hex_list, label))
-
-            for combination in combinations_cache[label]:
-                futures.append(executor.submit(
-                    process_combination, label, combination))
-
-        concurrent.futures.wait(futures)
-
-    return possible_moves
+#     if best_move is None:
+#         # Fallback to random move if no move was found within the time limit
+#         available_moves = [coord for label, hex_list in hexes_by_label.items(
+#         ) for coord, _ in hex_list if _['owner'] is None]
+#         best_move = random.sample(available_moves, 1)
+#         print(f"Fallback to random move: {best_move}")
+#     print(f"Best move found: {best_move}")
+#     return best_utility, best_move
 
 
-def generate_possible_moves_singlethread(hexes_by_label, curr_board, player_color, game_round_number):
-    possible_moves = []
+# async def iterative_deepening(hexes_by_label, curr_board, is_me_player_black, max_time, curr_turn, game_round_number):
+#     start_time = time.time()
+#     best_move = None
+#     best_utility = float('-inf')
+
+#     async def search_depth(depth):
+#         nonlocal best_move, best_utility
+#         print(f"Starting search at depth {depth}")
+#         utility, move = min_max_search(hexes_by_label, curr_board, is_me_player_black, depth, float(
+#             '-inf'), float('inf'), curr_turn == 'black', game_round_number)
+#         print(f"Depth {depth} completed: utility={utility}, move={move}")
+#         if (curr_turn == 'black' and utility > best_utility) or (curr_turn == 'white' and utility < best_utility):
+#             best_utility = utility
+#             best_move = move
+
+#     depth = 1
+#     while (time.time() - start_time) < max_time and depth < 3:
+#         try:
+#             await asyncio.wait_for(search_depth(depth), timeout=max_time - (time.time() - start_time))
+#         except asyncio.TimeoutError:
+#             print(f"Timeout reached at depth {depth}")
+#             break  # Time limit reached, break out of the loop
+#         depth += 1
+
+#     if best_move is None:
+#         # Fallback to random move if no move was found within the time limit
+#         available_moves = [coord for label, hex_list in hexes_by_label.items(
+#         ) for coord, _ in hex_list if _['owner'] is None]
+#         best_move = random.sample(available_moves, 1)
+#         print(f"Fallback to random move: {best_move}")
+
+#     return best_utility, best_move
+
+
+# # hexes_by_label: available hexes to choose from grouped by label
+# # current_board: copy of the game board
+# # current_turn : 'black' or 'white'
+
+# def generate_possible_moves_multithread(hexes_by_label, curr_board, player_color, game_round_number):
+#     possible_moves = []
+#     combinations_cache = {}
+
+#     def process_combination(label, combination):
+#         coordinates = [hex_info[0] for hex_info in combination]
+#         continuous_neighbors = count_continuous_neighbors(coordinates)
+#         if (label == 5 and len(hexes_by_label[label]) > 15 and continuous_neighbors < 3) or \
+#            (game_round_number < 5 and continuous_neighbors < label):
+#             return
+
+#         board_copy = copy.deepcopy(curr_board)
+#         hexes_by_label_copy = copy.deepcopy(hexes_by_label)
+
+#         for hex_info in combination:
+#             board_copy[hex_info[0]]['owner'] = player_color
+#             board_copy[hex_info[0]]['selected'] = True
+
+#         for hex_info in combination:
+#             hexes_by_label_copy[label].remove(hex_info)
+
+#         possible_moves.append((hexes_by_label_copy, board_copy, combination))
+
+#     with concurrent.futures.ThreadPoolExecutor() as executor:
+#         futures = []
+#         for label in list(hexes_by_label.keys()):
+#             hex_list = hexes_by_label[label]
+#             label = int(label)
+
+#             if label not in combinations_cache:
+#                 if len(hex_list) < label:
+#                     combinations_cache[label] = [hex_list]
+#                 else:
+#                     combinations_cache[label] = list(
+#                         itertools.combinations(hex_list, label))
+
+#             for combination in combinations_cache[label]:
+#                 futures.append(executor.submit(
+#                     process_combination, label, combination))
+
+#         concurrent.futures.wait(futures)
+
+#     return possible_moves
+
+
+def generate_promising_moves_singlethread(hexes_by_label, curr_board, player_color, game_round_number):
+    promising_moves = []
     for label in list(hexes_by_label.keys()):
         hex_list = hexes_by_label[label]
         label = int(label)
 
         if len(hex_list) < label:
-            combinations = [hex_list]
+            move_combinations = [hex_list]
         else:
-            combinations = itertools.combinations(hex_list, label)
+            move_combinations = gen_combinations(hex_list, label)
 
-        for combination in combinations:
-            if not is_promising_move(len(hexes_by_label[label]), combination, game_round_number, label):
+        for move in move_combinations:
+            if not is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
                 continue
 
             board_copy = copy.deepcopy(curr_board)
             hexes_by_label_copy = copy.deepcopy(hexes_by_label)
 
-            for hex_info in combination:
+            for hex_info in move:
                 board_copy[hex_info[0]]['owner'] = player_color
 
-            for hex_info in combination:
+            for hex_info in move:
                 hexes_by_label_copy[label].remove(hex_info)
 
-            possible_moves.append(
+            promising_moves.append(
                 (hexes_by_label_copy, board_copy))
     
-    return possible_moves
+    return promising_moves
 
 
 def generate_promising_moves(hexes_by_label, curr_board, is_player_black, game_round_number):
     player_color = 'black' if is_player_black else 'white'
-    return generate_possible_moves_singlethread(hexes_by_label, curr_board, player_color, game_round_number)
+    return generate_promising_moves_singlethread(hexes_by_label, curr_board, player_color, game_round_number)
 
 def gen_combinations(iterable, r):
     pool = tuple(iterable)
@@ -223,55 +224,45 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
 
 
         if len(hex_list) < label:
-            combinations = [hex_list]
+            move_combinations = [hex_list]
         else:
-            combinations = gen_combinations(hex_list, label)
+            move_combinations = gen_combinations(hex_list, label)
 
-        for combination in combinations:
+        for move in move_combinations:
             # print("combination: " + str(combination))
-            if not is_promising_move(len(hexes_by_label[label]), combination, game_round_number, label):
+            if not is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
                 continue
 
-            for hex_info in combination:
-                curr_board[hex_info[0]]['owner'] = player_color
-
-            for hex_info in combination:
-                hexes_by_label[label].remove(hex_info)
+            for hex_field in move:
+                curr_board[hex_field[0]]['owner'] = player_color
+            
+            hexes_by_label[label] = [hex_field for hex_field in hexes_by_label[label] if hex_field not in move]
 
             utility, moves = recursive_min_max_search(
                 hexes_by_label, curr_board, is_me_player_black, remaining_depth - 1, alpha, beta, not max_mode, game_round_number + 1)
 
-            for hex_info in combination:
-                curr_board[hex_info[0]]['owner'] = None
+            for hex_field in move:
+                curr_board[hex_field[0]]['owner'] = None
 
-            for hex_info in combination:
-                hexes_by_label[label].append(hex_info)
-
-            # if utility >= best_utility and random.random() < 0.5:
-            #     moves = tuple([hex_info[0] for hex_info in combination])
-            #     best_moves = moves
+            for hex_field in move:
+                hexes_by_label[label].append(hex_field)
 
             if max_mode:
                 if utility > best_utility:
-                    moves = tuple([hex_info[0] for hex_info in combination])
+                    moves = tuple([hex_field[0] for hex_field in move])
 
                     best_utility = utility
                     best_moves = moves
                 alpha = max(alpha, utility)
             else:
                 if utility < best_utility:
-                    moves = tuple([hex_info[0] for hex_info in combination])
+                    moves = tuple([hex_field[0] for hex_field in move])
 
                     best_utility = utility
                     best_moves = moves
                 beta = min(beta, utility)
             if beta <= alpha:
                 break
-
-    # if max_mode:
-    #     print ("max: best utility: " + str(best_utility) + " best moves: " + str(best_moves))
-    # else:
-    #     print ("min: best utility: " + str(best_utility) + " best moves: " + str(best_moves))
 
     return best_utility, best_moves
 
@@ -324,27 +315,25 @@ def start_thread(memory_debug, hexes_by_label, curr_board, is_me_player_black, r
         local_alpha = alpha.value
         local_beta = beta.value
 
-    move = recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, local_alpha, local_beta, max_mode, game_round_number)
+    best_move = recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, local_alpha, local_beta, max_mode, game_round_number)
     # Stop tracing and get the current, peak and cumulative memory usage
-    if (memory_debug): 
-        current, peak = tracemalloc.get_traced_memory()
+    if (memory_debug):
+        _, memory_peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
     else:
-        peak = -1
+        memory_peak = -1
     # print(f"Peak memory usage is {peak / 10**6}MB")
     # update global alpha and beta
     with lock:
         if max_mode:
-            alpha.value = max(alpha.value, move[0])
+            alpha.value = max(alpha.value, best_move[0])
         else:
-            beta.value = min(beta.value, move[0])
-    return move, peak
+            beta.value = min(beta.value, best_move[0])
+    return best_move, memory_peak
 
 
 
 def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, max_mode, game_round_number):
-    # is_curr_player_black = is_me_player_black ^ (not max_mode)
-    # player_color = 'black' if is_curr_player_black else 'white'
     memory_debug = False
 
     if remaining_depth == 0:
@@ -358,11 +347,20 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remainin
     # generate sub tasks for the processes
     # print all the variables at this point for debugging
     # print("Starting min max search with depth: " + str(remaining_depth) + " and max mode: " + str(max_mode) + " and game round number: " + str(game_round_number))
-    print("hexes by label: " + str(sys.getsizeof(hexes_by_label)))
-    print("current board: " + str(sys.getsizeof(curr_board)))
-    print("is me player black: " + str(is_me_player_black))
+    # print("hexes by label: " + str(sys.getsizeof(hexes_by_label)))
+    # print("current board: " + str(sys.getsizeof(curr_board)))
+    # print("is me player black: " + str(is_me_player_black))
     promising_moves = generate_promising_moves(
         hexes_by_label, curr_board, is_me_player_black, game_round_number)
+    import pickle
+
+    # with open(f'promising_moves_{game_round_number}.pickle', 'wb') as f:
+    #     pickle.dump(promising_moves, f) 
+    # with open(f'promising_moves_8.pickle', 'rb') as f:
+    #     promising_moves_8 = pickle.load(f)
+    # with open(f'promising_moves_10.pickle', 'rb') as f:
+    #     promising_moves_10 = pickle.load(f)
+
     random.shuffle(promising_moves)
     print(f"Generated {len(promising_moves)} first level branches")
     # if memory_debug:
@@ -377,8 +375,6 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, remainin
     # if game_round_number >= 9:
     #     memory_debug = True
     #     promising_moves = promising_moves[:1]
-
-    from multiprocessing import Manager
 
     # Create a Manager object
     with Manager() as manager:
