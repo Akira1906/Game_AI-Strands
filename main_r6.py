@@ -6,6 +6,7 @@ import random
 import sys
 import time
 from minmax_ai_logic import init_min_max_search
+from mcts_ai_logic import init_mcts_search
 import multiprocessing as mp
 import pickle
 # Define static variables and hexagon properties
@@ -459,7 +460,7 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             if any(not hex_info['selected'] for _, hex_info in hexes)
         }
         if available_labels:
-            me_player_black = curr_turn == 'black'
+            is_me_player_black = curr_turn == 'black'
 
             # minimize the game board object
             # hexagon_board is a list of {'x': 261.43593539448983, 'y': 60.0, 'label': 6, 'selected': False, 'owner': None}
@@ -501,7 +502,8 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             
 
             start_time = time.time()
-            best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 3, max_mode=True, game_round_number=curr_round)
+            # best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, game_round_number=curr_round)
+            best_move = init_mcts_search(hexes_by_label_copy, board_copy, is_me_player_black, game_round_number=curr_round)
             end_time = time.time()
 
             # Test area to determine the memory problem
@@ -511,10 +513,25 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
 
             print("Time taken: " + str(end_time - start_time)+"s")
             print("choose move with best utility: " + str(best_move))
-            selected_hexes.extend([(hex, hexagon_board[hex])
+            if best_move is not None and len(best_move[1]) > 0:
+                selected_hexes.extend([(hex, hexagon_board[hex])
                                   for hex in hexagon_board.keys() if hex in best_move[1]])
+            # select random choice when there is not decision made
+            else:
+                selected_label = random.choice(list(available_labels.keys()))
+                available_hexes = [
+                    (pos, hex_info) for pos, hex_info in available_labels[selected_label] if not hex_info['selected']]
+                # Determine the number of hexagons to select based on their labels.
+                n = selected_label
 
+                # Randomly select n hexes, select all remaining hexes if fewer than n are available
+                if len(available_hexes) > n:
+                    selected_hexes.extend(random.sample(available_hexes, n))
+                else:
+                    selected_hexes.extend(available_hexes)
         print(curr_round)
+
+        
     return selected_hexes
 
 
@@ -538,7 +555,8 @@ def main(black_player, white_player):
     print(f"Player 1: {black_player}, Player 2: {white_player}")
 
     """Main game loop."""
-    global selected_counts, current_label, current_turn, turn_ended, current_round, start_time, required_selections, black_player_type, white_player_type, remaining_hexes, hexagon_board, running
+    global selected_counts, current_label, current_turn, turn_ended, current_round, start_time
+    global required_selections, black_player_type, white_player_type, remaining_hexes, hexagon_board, running
     start_time = pygame.time.get_ticks()  #
     running = True
     current_round = 1
