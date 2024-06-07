@@ -5,7 +5,7 @@ import os
 import random
 import sys
 import time
-from ai_logic import init_min_max_search
+from minmax_ai_logic import init_min_max_search
 import multiprocessing as mp
 import pickle
 # Define static variables and hexagon properties
