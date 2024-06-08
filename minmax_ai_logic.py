@@ -113,40 +113,37 @@ def start_thread(hexes_by_label, curr_board, is_me_player_black, remaining_depth
     return best_move, memory_peak
 
 
-def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_round_number):
+def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_round_number, timeout):
     max_mode = True
     memory_debug = False
     start_time = time.time()
     if not max_mode:
         print("error: max mode is false at init")
 
-    # set number of processes
-    number_of_processes = cpu_count()
+    number_of_threads = cpu_count()
+    
     promising_moves = generate_promising_moves_with_board(
         hexes_by_label, curr_board, is_me_player_black, game_round_number)
-
     random.shuffle(promising_moves)
     print(f"Generated {len(promising_moves)} first level branches")
-
-    # iterative deepening TODO: add game won detection
-    TIMEOUT = 9
-    iteration_depth = 1
+    # reduce timeout for extra time buffer
+    timeout -= 1
+    # start iteration depth: 2
+    iteration_depth = 2 - 1
     max_moves = []
-    while TIMEOUT - (time.time() - start_time) > 0:
+    while timeout - (time.time() - start_time) > 0:
         local_start_time = time.time()
-        curr_timeout = TIMEOUT - (time.time() - start_time)
+        curr_timeout = timeout - (time.time() - start_time)
         iteration_depth += 1
         print(
             f"Iteration depth: {iteration_depth}, time left: {curr_timeout} seconds")
         # Create a Manager object
         with Manager() as manager:
-            # Create Value and Lock objects using the Manager
-            # 'd' indicates a double precision float
             alpha = manager.Value('d', -float('inf'))
             beta = manager.Value('d', float('inf'))
             lock = manager.Lock()
 
-            with Pool(processes=number_of_processes) as pool:
+            with Pool(processes=number_of_threads) as pool:
                 results = [pool.apply_async(start_thread,
                                             (hex, board, is_me_player_black, iteration_depth - 1, alpha,
                                              beta, not max_mode, game_round_number + 1, lock, memory_debug)) for hex, board in promising_moves]
@@ -155,7 +152,7 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
                 for i, result in enumerate(results):
                     try:
                         # wait for up to time_to_wait seconds
-                        return_value = result.get(time_to_wait)
+                        result.get(time_to_wait)
                     except TimeoutError:
                         pass
                         # print('Timeout for v = ', i)

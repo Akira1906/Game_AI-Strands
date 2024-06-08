@@ -7,7 +7,7 @@ import sys
 import time
 import timeit
 import concurrent.futures
-from multiprocessing import Process, freeze_support, set_start_method, Pool, cpu_count, Value, Lock, Manager, TimeoutError
+from multiprocessing import Process, freeze_support, set_start_method, Pool, cpu_count, Value, Lock, Manager, TimeoutError, Process
 import threading
 import asyncio
 from memory_profiler import profile
@@ -181,22 +181,57 @@ def _find_winner(hex_board):
         return None
 
 
-def init_mcts_search(hexes_by_label, hex_board, is_me_player_black, game_round_number):
+def start_mcts_thread(hexes_by_label, hex_board, is_me_player_black, game_round_number, time_limit, start_time, return_dict, index):
     tree = MCTS()
     board = StrandsBoard(hexes_by_label, hex_board,
                          is_me_player_black, game_round_number)
     if board.is_terminal():
         return []
+
+    while time.time() - start_time < time_limit - 1:
+        tree.do_rollout(board)
+    return_dict[index] = (tree, board)
+
+
+def init_mcts_search(hexes_by_label, hex_board, is_me_player_black, game_round_number, timeout):
+    start_time = time.time()
     # root parallelization
     # create multiple trees in parallel, later compare the nodes and choose the best one
-    for _ in range(100):
-        tree.do_rollout(board)
-    board = tree.choose(board)
+    number_of_threads = 1
+    timeout -= 1
+
+    processes = []
+    manager = Manager()
+    return_dict = manager.dict()
+
+    for i in range(number_of_threads):
+        process = Process(
+            target=start_mcts_thread,
+            args=(hexes_by_label, hex_board, is_me_player_black,
+                  game_round_number, timeout, start_time, return_dict, i)
+        )
+        process.start()
+        processes.append(process)
+
+    for process in processes:
+        process.join()
+
+    # aggregate results from all threads
+    aggregated_tree = MCTS()
+    for tree, board in return_dict.values():
+        for node in tree.N:
+            aggregated_tree.N[node] += tree.N[node]
+            aggregated_tree.Q[node] += tree.Q[node]
+        for node in tree.children:
+            if node not in aggregated_tree.children:
+                aggregated_tree.children[node] = tree.children[node]
+    best_board = aggregated_tree.choose(StrandsBoard(
+        hexes_by_label, hex_board, is_me_player_black, game_round_number))
 
     # difference between hex_board and board.hex_board
     moves = []
     for coords, info in hex_board.items():
-        if info['owner'] != board.hex_board[coords]['owner']:
+        if info['owner'] != best_board.hex_board[coords]['owner']:
             moves.append(coords)
 
     return moves

@@ -462,8 +462,8 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
         if available_labels:
             is_me_player_black = curr_turn == 'black'
 
-            # minimize the game board object
-            # hexagon_board is a list of {'x': 261.43593539448983, 'y': 60.0, 'label': 6, 'selected': False, 'owner': None}
+            # minimize the game board object and hexagon list object
+
             board_copy = copy.deepcopy(hexagon_board)
             board_copy = {pos: {
                 'label': info['label'], 'owner': info['owner']} for pos, info in board_copy.items()}
@@ -472,41 +472,15 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
                 label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in hexes_by_label_copy.items()
             }
 
-            # if curr_round >= 9:
-            #     with open(f"hexes_by_label_copy_{curr_round}.pickle", 'wb') as file:
-            #         # Serialize and save the object to the file
-            #         pickle.dump(hexes_by_label_copy, file)
-            #     with open(f"board_copy_{curr_round}.pickle", 'wb') as file:
-            #         # Serialize and save the object to the file
-            #         pickle.dump(board_copy, file)
-            #     with open(f"me_player_black_{curr_round}.pickle", 'wb') as file:
-            #         # Serialize and save the object to the file
-            #         pickle.dump(me_player_black, file)
-            
-            # test area to determine the memory problem
-            # load game state from pickle files
-            # with open('board_copy_12.pickle', 'rb') as f:
-            #     board_copy_12 = pickle.load(f)
-            # with open('hexes_by_label_copy_12.pickle', 'rb') as f:
-            #     hexes_by_label_copy_12 = pickle.load(f)
-            # with open('me_player_black_12.pickle', 'rb') as f:
-            #     me_player_black_12 = pickle.load(f)
-
-            # with open("board_copy_10.pickle", 'rb') as file:
-            #     board_copy_10 = pickle.load(file)
-            # with open("hexes_by_label_copy_10.pickle", 'rb') as file:
-            #     hexes_by_label_copy_10 = pickle.load(file)
-            # with open("me_player_black_10.pickle", 'rb') as file:
-            #     me_player_black_10 = pickle.load(file)
             mode = 'MCTS' # 'MCTS' or 'MINMAX'
-            
 
-            start_time = time.time()
+            local_start_time = time.time()
+            TIMEOUT = 15
             if mode == "MINMAX":
-                best_move = init_min_max_search(hexes_by_label_copy, board_copy, is_me_player_black, game_round_number=curr_round)
+                best_move = init_min_max_search(hexes_by_label_copy, board_copy, is_me_player_black, curr_round, TIMEOUT)
                 best_move = best_move[1]
             elif mode == "MCTS":
-                best_move = init_mcts_search(hexes_by_label_copy, board_copy, is_me_player_black, game_round_number=curr_round)
+                best_move = init_mcts_search(hexes_by_label_copy, board_copy, is_me_player_black, curr_round, TIMEOUT)
             end_time = time.time()
                 
             # Test area to determine the memory problem
@@ -514,7 +488,7 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             #     best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, max_mode=True, game_round_number=curr_round)
             #     print (i)
 
-            print("Time taken: " + str(end_time - start_time)+"s")
+            print("Time taken: " + str(end_time - local_start_time)+"s")
             print(mode + ": choose best move -> " + str(best_move))
             if best_move is not None and len(best_move) > 0:
                 selected_hexes.extend([(hex, hexagon_board[hex])
