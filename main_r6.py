@@ -498,24 +498,27 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             #     hexes_by_label_copy_10 = pickle.load(file)
             # with open("me_player_black_10.pickle", 'rb') as file:
             #     me_player_black_10 = pickle.load(file)
-
+            mode = 'MCTS' # 'MCTS' or 'MINMAX'
             
 
             start_time = time.time()
-            # best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, game_round_number=curr_round)
-            best_move = init_mcts_search(hexes_by_label_copy, board_copy, is_me_player_black, game_round_number=curr_round)
+            if mode == "MINMAX":
+                best_move = init_min_max_search(hexes_by_label_copy, board_copy, is_me_player_black, game_round_number=curr_round)
+                best_move = best_move[1]
+            elif mode == "MCTS":
+                best_move = init_mcts_search(hexes_by_label_copy, board_copy, is_me_player_black, game_round_number=curr_round)
             end_time = time.time()
-
+                
             # Test area to determine the memory problem
             # for i in range(10000):
             #     best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, max_mode=True, game_round_number=curr_round)
             #     print (i)
 
             print("Time taken: " + str(end_time - start_time)+"s")
-            print("choose move with best utility: " + str(best_move))
-            if best_move is not None and len(best_move[1]) > 0:
+            print(mode + ": choose best move -> " + str(best_move))
+            if best_move is not None and len(best_move) > 0:
                 selected_hexes.extend([(hex, hexagon_board[hex])
-                                  for hex in hexagon_board.keys() if hex in best_move[1]])
+                                  for hex in hexagon_board.keys() if hex in best_move])
             # select random choice when there is not decision made
             else:
                 selected_label = random.choice(list(available_labels.keys()))

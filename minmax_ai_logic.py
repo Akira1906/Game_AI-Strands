@@ -122,38 +122,11 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
 
     # set number of processes
     number_of_processes = cpu_count()
-    # print("number of processes: " + str(number_of_processes))
-    # generate sub tasks for the processes
-    # print all the variables at this point for debugging
-    # print("Starting min max search with depth: " + str(remaining_depth) + " and max mode: " + str(max_mode) + " and game round number: " + str(game_round_number))
-    # print("hexes by label: " + str(sys.getsizeof(hexes_by_label)))
-    # print("current board: " + str(sys.getsizeof(curr_board)))
-    # print("is me player black: " + str(is_me_player_black))
     promising_moves = generate_promising_moves_with_board(
         hexes_by_label, curr_board, is_me_player_black, game_round_number)
-    # import pickle
-
-    # with open(f'promising_moves_{game_round_number}.pickle', 'wb') as f:
-    #     pickle.dump(promising_moves, f)
-    # with open(f'promising_moves_8.pickle', 'rb') as f:
-    #     promising_moves_8 = pickle.load(f)
-    # with open(f'promising_moves_10.pickle', 'rb') as f:
-    #     promising_moves_10 = pickle.load(f)
 
     random.shuffle(promising_moves)
     print(f"Generated {len(promising_moves)} first level branches")
-    # if memory_debug:
-    #     next_round_moves = generate_promising_moves(hexes_by_label, curr_board, is_me_player_black, game_round_number + 1)
-    #     print(f"Generated potential: {str(len(next_round_moves))} second level branches)")
-    #     next_round_moves = generate_promising_moves(hexes_by_label, curr_board, is_me_player_black, game_round_number + 2)
-    #     print(f"Generated potential: {str(len(next_round_moves))} third level branches")
-
-    # monitoring_thread = threading.Thread(target=monitor_memory, daemon=True)
-    # monitoring_thread.start()
-
-    # if game_round_number >= 9:
-    #     memory_debug = True
-    #     promising_moves = promising_moves[:1]
 
     # iterative deepening TODO: add game won detection
     TIMEOUT = 9

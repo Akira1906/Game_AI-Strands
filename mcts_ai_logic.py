@@ -13,10 +13,11 @@ import asyncio
 from memory_profiler import profile
 import tracemalloc
 import psutil
-from ai_helper_functions import gen_combinations, is_promising_move, evaluate_board_position, generate_promising_moves, count_connected_area
+from ai_helper_functions import gen_combinations, is_promising_move, evaluate_board_position, generate_promising_moves, count_connected_area, generate_random_promising_move
 from abc import ABC, abstractmethod
 from collections import defaultdict
 import math
+
 
 class MCTS:
     "Monte Carlo tree searcher. First rollout the tree then choose a move."
@@ -27,7 +28,7 @@ class MCTS:
         self.children = dict()  # children of each node
         self.exploration_weight = exploration_weight
 
-    def choose(self, node): #TODO: fix this, have a look
+    def choose(self, node):  # TODO: fix this, have a look
         "Choose the best successor of node. (Choose a move in the game)"
         if node.is_terminal():
             raise RuntimeError(f"choose called on terminal node {node}")
@@ -46,8 +47,8 @@ class MCTS:
         "Make the tree one layer better. (Train for one iteration.)"
         path = self._select(node)
         leaf = path[-1]
-        self._expand(leaf)
-        reward = self._simulate(leaf)
+        self._expand(leaf)  # slow
+        reward = self._simulate(leaf)  # slow
         self._backpropagate(path, reward)
 
     def _select(self, node):
@@ -102,8 +103,9 @@ class MCTS:
 
         return max(self.children[node], key=uct)
 
+
 class StrandsBoard:
-    def __init__(self, remaining_hexes, hex_board, is_me_player_black, game_round_number, terminal = False, winner = None, my_turn = True):
+    def __init__(self, remaining_hexes, hex_board, is_me_player_black, game_round_number, terminal=False, winner=None, my_turn=True):
         self.remaining_hexes = remaining_hexes
         self.hex_board = hex_board
         self.is_me_player_black = is_me_player_black
@@ -116,20 +118,21 @@ class StrandsBoard:
         if self.is_terminal():
             return []
         return {
-            self.make_move(move) for move in generate_promising_moves(self.remaining_hexes, self.hex_board, self.is_me_player_black, self.game_round_number)
+            self.make_move(move) for move in generate_promising_moves(self.remaining_hexes, self.game_round_number)
         }
 
     def find_random_child(self):
         if self.is_terminal():
             return None
-        promising_moves = generate_promising_moves(self.remaining_hexes, self.hex_board, self.is_me_player_black, self.game_round_number)
-        if promising_moves == []:
+        random_promising_move = generate_random_promising_move(
+            self.remaining_hexes, self.game_round_number)
+        if random_promising_move == []:
             return None
         else:
-            return self.make_move(random.choice(promising_moves))
+            return self.make_move(random_promising_move)
 
     def reward(self):
-        #give positive reward if the player has won
+        # give positive reward if the player has won
         if not self.is_terminal():
             raise RuntimeError("reward called on nonterminal board")
 
@@ -139,16 +142,15 @@ class StrandsBoard:
             return 0.5
         else:
             return 0
-        
-        
-        
+
         # return evaluate_board_position(self.curr_board, self.is_me_player_black, self.game_round_number)
 
     def is_terminal(self):
         return self.terminal
-    
+
     def make_move(self, move):
-        player_color = 'black' if ((self.is_me_player_black and self.my_turn) or (not self.is_me_player_black and not self.my_turn)) else 'white'
+        player_color = 'black' if ((self.is_me_player_black and self.my_turn) or (
+            not self.is_me_player_black and not self.my_turn)) else 'white'
         label = move[0][1]["label"]
         hex_board = copy.deepcopy(self.hex_board)
         remaining_hexes = copy.deepcopy(self.remaining_hexes)
@@ -158,13 +160,15 @@ class StrandsBoard:
         remaining_hexes[label] = [
             hex_field for hex_field in remaining_hexes[label] if hex_field not in move]
         my_turn = not self.my_turn
-        terminal = remaining_hexes[6] == [] and remaining_hexes[5] == [] and remaining_hexes[3] == [] and remaining_hexes[2] == [] and remaining_hexes[1] == []
+        # check if every list in remaining_hexes is empty
+        terminal = all([len(hex_list) == 0 for hex_list in remaining_hexes.values(
+        )]) or remaining_hexes == []
         winner = None
         if terminal:
-            winner =_find_winner(self.hex_board)
+            winner = _find_winner(self.hex_board)
         return StrandsBoard(remaining_hexes, hex_board, self.is_me_player_black, self.game_round_number + 1, terminal, winner, my_turn)
-        
-        
+
+
 # True if black wins, False if white wins, None if draw
 def _find_winner(hex_board):
     black_connected_area = count_connected_area(hex_board, 'black')
@@ -176,27 +180,23 @@ def _find_winner(hex_board):
     else:
         return None
 
+
 def init_mcts_search(hexes_by_label, hex_board, is_me_player_black, game_round_number):
     tree = MCTS()
-    board = StrandsBoard(hexes_by_label, hex_board, is_me_player_black, game_round_number)
+    board = StrandsBoard(hexes_by_label, hex_board,
+                         is_me_player_black, game_round_number)
     if board.is_terminal():
         return []
-    for _ in range(10):
+    # root parallelization
+    # create multiple trees in parallel, later compare the nodes and choose the best one
+    for _ in range(100):
         tree.do_rollout(board)
     board = tree.choose(board)
-    print(board)
-    
-    return []
 
+    # difference between hex_board and board.hex_board
+    moves = []
+    for coords, info in hex_board.items():
+        if info['owner'] != board.hex_board[coords]['owner']:
+            moves.append(coords)
 
-def mcts_iteration(hexes_by_label, curr_board, is_me_player_black, game_round_number):
-    for i in range(1000):
-    
-    # MCTS
-        # select_next_node_to_expand()
-    # 1. Selection
-    # 2. Expansion
-    # 3. Simulation
-    # 4. Backpropagation
-    # 5. Selection
-        pass
+    return moves

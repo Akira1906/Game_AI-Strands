@@ -1,4 +1,6 @@
 import copy
+import random
+import itertools
 
 
 def generate_promising_moves_with_board(hexes_by_label, curr_board, is_player_black, game_round_number):
@@ -33,8 +35,8 @@ def generate_promising_moves_with_board(hexes_by_label, curr_board, is_player_bl
                 (hexes_by_label_copy, board_copy))
     return promising_moves
 
-def generate_promising_moves(hexes_by_label, curr_board, is_player_black, game_round_number):
-    player_color = 'black' if is_player_black else 'white'
+
+def generate_promising_moves(hexes_by_label, game_round_number):
     promising_moves = []
     for label in list(hexes_by_label.keys()):
         hex_list = hexes_by_label[label]
@@ -55,6 +57,26 @@ def generate_promising_moves(hexes_by_label, curr_board, is_player_black, game_r
     return promising_moves
 
 
+def generate_random_promising_move(hexes_by_label, game_round_number):
+    random_promising_moves = []
+    for label in list(hexes_by_label.keys()):
+        hex_list = hexes_by_label[label]
+        label = int(label)
+
+        if len(hex_list) < label:
+            if len(hex_list) == 0:
+                pass
+            elif is_promising_move(len(hexes_by_label[label]), hex_list, game_round_number, label):
+
+                random_promising_moves.append(hex_list)
+        else:
+            for move in gen_random_combinations(hex_list, label):
+                if is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
+                    random_promising_moves.append(move)
+                    break
+    return random.choice(random_promising_moves)
+
+
 def gen_combinations(iterable, r):
     pool = tuple(iterable)
     n = len(pool)
@@ -72,6 +94,50 @@ def gen_combinations(iterable, r):
         for j in range(i+1, r):
             indices[j] = indices[j-1] + 1
         yield tuple(pool[i] for i in indices)
+
+
+def gen_random_combinations(iterable, r):
+    pool = tuple(iterable)
+    n = len(pool)
+    if r > n:
+        return
+
+    # Generate permutation indices in a pseudorandom order
+    indices = list(range(r))
+    max_index = len(list(itertools.combinations(range(n), r)))
+    order = list(range(max_index))
+    random.shuffle(order)
+
+    for index in order:
+        # Generate the specific permutation from the permutation index
+        indices = nth_combination(index, range(n), r)
+        yield tuple(pool[i] for i in indices)
+
+
+def nth_combination(index, iterable, r):
+    'Equivalent to list(itertools.combinations(iterable, r))[index]'
+    pool = tuple(iterable)
+    n = len(pool)
+    if r < 0 or r > n:
+        raise ValueError
+    c = 1
+    k = min(r, n-r)
+    for i in range(1, k+1):
+        c = c * (n - k + i) // i
+    if index < 0:
+        index += c
+    if index < 0 or index >= c:
+        raise IndexError
+    result = []
+    while r:
+        c, n, r = c*r//n, n-1, r-1
+        while index >= c:
+            index -= c
+            c, n = c*(n-r+1)//n, n-1
+            if n == 0:
+                break
+        result.append(pool[-1-n])
+    return tuple(result)
 
 
 def is_promising_move(len_fields_of_label, move, game_round_number, label):
