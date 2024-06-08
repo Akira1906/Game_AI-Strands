@@ -143,10 +143,6 @@ def nth_combination(index, iterable, r):
 def is_promising_move(len_fields_of_label, move, game_round_number, label):
     continuous_neighbors = count_continuous_neighbors(
         [hex_info[0] for hex_info in move])
-    # MAX: 34 rounds
-    # start phase: 0-10
-    # mid phase: 10-20
-    # end phase: 20-34
     early_start_phase = 4
     start_phase = 10
     mid_phase = 20
@@ -174,12 +170,6 @@ def is_promising_move(len_fields_of_label, move, game_round_number, label):
                 return False
     else:
         return True
-        # elif label == 5 and len_fields_of_label > 15:
-        #     if cluster_dimension < 4 and continuous_neighbors < 4:
-        #         return False
-
-    # if label == 6:
-    #     return True
     return True
 
 

@@ -472,7 +472,7 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
                 label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in hexes_by_label_copy.items()
             }
 
-            mode = 'MCTS' # 'MCTS' or 'MINMAX'
+            mode = 'MINMAX' # 'MCTS' or 'MINMAX'
 
             local_start_time = time.time()
             TIMEOUT = 15
