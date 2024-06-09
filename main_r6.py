@@ -1,14 +1,11 @@
-import itertools
-import copy
 import math
 import os
 import random
 import sys
-import time
 from minmax_ai_logic import init_min_max_search
 from mcts_ai_logic import init_mcts_search
-import multiprocessing as mp
-import pickle
+
+
 # Define static variables and hexagon properties
 BG_COLOR = (30, 30, 30)
 BLACK = (0, 0, 0)
@@ -443,7 +440,8 @@ def select_hexes_by_random(hexes_by_label, current_round):
 # current_turn : 'black' or 'white'
 
 def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
-    """Selects hexes randomly based on the current round and label availability."""
+    import copy
+    import time
     selected_hexes = []
     if curr_round == 1:
         # Special handling for the first round: only select one hexagon labeled as 2.
@@ -463,44 +461,35 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             is_me_player_black = curr_turn == 'black'
 
             # minimize the game board object and hexagon list object
-
-            board_copy = copy.deepcopy(hexagon_board)
             board_copy = {pos: {
-                'label': info['label'], 'owner': info['owner']} for pos, info in board_copy.items()}
-            hexes_by_label_copy = copy.deepcopy(hexes_by_label)
+                'label': info['label'], 'owner': info['owner']} for pos, info in copy.deepcopy(hexagon_board).items()}
             hexes_by_label_copy = {
-                label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in hexes_by_label_copy.items()
+                label: [(coord, {'label': details['label'], 'owner': details['owner']})for coord, details in hex_list] for label, hex_list in copy.deepcopy(hexes_by_label).items()
             }
 
-            mode = 'MINMAX' # 'MCTS' or 'MINMAX'
-
+            MODE = 'MINMAX' # 'MCTS' or 'MINMAX'
+            TIMEOUT = 10
+            
             local_start_time = time.time()
-            TIMEOUT = 15
-            if mode == "MINMAX":
+            if MODE == "MINMAX":
                 best_move = init_min_max_search(hexes_by_label_copy, board_copy, is_me_player_black, curr_round, TIMEOUT)
-                best_move = best_move[1]
-            elif mode == "MCTS":
+            elif MODE == "MCTS":
                 best_move = init_mcts_search(hexes_by_label_copy, board_copy, is_me_player_black, curr_round, TIMEOUT)
             end_time = time.time()
-                
-            # Test area to determine the memory problem
-            # for i in range(10000):
-            #     best_move = init_min_max_search(hexes_by_label_copy, board_copy, me_player_black, 2, max_mode=True, game_round_number=curr_round)
-            #     print (i)
 
             print("Time taken: " + str(end_time - local_start_time)+"s")
-            print(mode + ": choose best move -> " + str(best_move))
+            print(MODE + ": choose best move -> " + str(best_move))
             if best_move is not None and len(best_move) > 0:
                 selected_hexes.extend([(hex, hexagon_board[hex])
                                   for hex in hexagon_board.keys() if hex in best_move])
-            # select random choice when there is not decision made
+            # select random choice when there is no decision made
             else:
+                print("No decision made, select random choice")
                 selected_label = random.choice(list(available_labels.keys()))
                 available_hexes = [
                     (pos, hex_info) for pos, hex_info in available_labels[selected_label] if not hex_info['selected']]
                 # Determine the number of hexagons to select based on their labels.
                 n = selected_label
-
                 # Randomly select n hexes, select all remaining hexes if fewer than n are available
                 if len(available_hexes) > n:
                     selected_hexes.extend(random.sample(available_hexes, n))
@@ -695,11 +684,11 @@ def main(black_player, white_player):
 
 
 if __name__ == '__main__':
+    import multiprocessing as mp
     mp.freeze_support()
     mp.set_start_method('spawn', force=True)
     if mp.current_process().name == 'MainProcess':
         import pygame
-        # print("process name: ", mp.current_process().name)
         sys.argv.append('random')
         sys.argv.append('ai')
         if len(sys.argv) != 3:
@@ -708,4 +697,3 @@ if __name__ == '__main__':
             sys.exit(1)
 
         main(sys.argv[1], sys.argv[2])
-        # main('random', 'random')

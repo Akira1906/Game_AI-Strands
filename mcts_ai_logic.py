@@ -13,7 +13,7 @@ import asyncio
 from memory_profiler import profile
 import tracemalloc
 import psutil
-from ai_helper_functions import gen_combinations, is_promising_move, evaluate_board_position, generate_promising_moves, count_connected_area, generate_random_promising_move
+from ai_helper_functions import gen_combinations, is_promising_move, evaluate_board_position, generate_promising_moves, my_count_connected_area, generate_random_promising_move
 from abc import ABC, abstractmethod
 from collections import defaultdict
 import math
@@ -171,8 +171,8 @@ class StrandsBoard:
 
 # True if black wins, False if white wins, None if draw
 def _find_winner(hex_board):
-    black_connected_area = count_connected_area(hex_board, 'black')
-    white_connected_area = count_connected_area(hex_board, 'white')
+    black_connected_area = my_count_connected_area(hex_board, 'black')
+    white_connected_area = my_count_connected_area(hex_board, 'white')
     if black_connected_area > white_connected_area:
         return True
     elif black_connected_area < white_connected_area:
