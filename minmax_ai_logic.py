@@ -40,6 +40,8 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
 
     for label in hexes_by_label.keys():
         hex_list = hexes_by_label[label]
+        if not hex_list:
+            continue
         label = int(label)
         # print("hex_list: " + str(hex_list) + " label: " + str(label))
 
@@ -52,7 +54,7 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
             # print("combination: " + str(combination))
             if not is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
                 continue
-
+            #apply move
             for hex_field in move:
                 curr_board[hex_field[0]]['owner'] = curr_player_color
 
@@ -183,25 +185,19 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
     iteration_depth = 2 - 1
     max_moves = []
     moves = []
-    with Manager() as manager:
-        alpha = manager.Value('d', -float('inf'))
-        beta = manager.Value('d', float('inf'))
-        lock = manager.Lock()
-        while timeout - (time.time() - start_time) > 0:
-            local_start_time = time.time()
-            curr_timeout = timeout - (time.time() - start_time)
-            iteration_depth += 1
-            print(
-                f"Iteration: {iteration_depth}, time left: {curr_timeout} seconds")
+    
+    while timeout - (time.time() - start_time) > 0:
+        local_start_time = time.time()
+        curr_timeout = timeout - (time.time() - start_time)
+        iteration_depth += 1
+        print(
+            f"Iteration: {iteration_depth} starts, time limit: {curr_timeout} s")
+        with Manager() as manager:
+            alpha = manager.Value('d', -float('inf'))
+            beta = manager.Value('d', float('inf'))
+            lock = manager.Lock()
 
             with Pool(processes=thread_num) as pool:
-                # hexes_by_label_copy = copy.deepcopy(hexes_by_label)
-                # curr_board_copy = copy.deepcopy(curr_board)
-                # for move in pure_promising_moves:
-                #     player_color = 'black' if is_me_player_black else 'white'
-                #     hexes_by_label_copy[move[1]] = [hex_field for hex_field in hexes_by_label_copy[move[1]] if hex_field[0] not in move[0]]
-                #     for hex_coords in move[0]:
-                #         curr_board_copy[hex_coords]['owner'] = player_color
 
                 results = [pool.apply_async(start_thread,
                                             (move, hexes_by_label, curr_board, is_me_player_black, iteration_depth - 1, alpha,

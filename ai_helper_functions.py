@@ -16,7 +16,7 @@ def is_promising_move(len_fields_of_label, move, game_round_number, label):
     Returns:
         bool: True if the move is promising, False otherwise.
     """
-    # return True
+    return True
     continuous_neighbors = count_continuous_neighbors(
         [hex_info[0] for hex_info in move])
     early_start_phase = 4
@@ -62,7 +62,6 @@ def is_promising_move_pure(len_fields_of_label, move, game_round_number, label):
     Returns:
         bool: True if the move is promising, False otherwise.
     """
-    # return True
     continuous_neighbors = count_continuous_neighbors(move)
     early_start_phase = 4
     start_phase = 10
@@ -70,7 +69,7 @@ def is_promising_move_pure(len_fields_of_label, move, game_round_number, label):
     end_phase = 34
 
     if game_round_number < early_start_phase:
-        if label in [2, 3] and continuous_neighbors < label:
+        if label in [2, 3]:
             return False
         elif label == 5 and continuous_neighbors < 4:
             return False
@@ -87,14 +86,14 @@ def is_promising_move_pure(len_fields_of_label, move, game_round_number, label):
                 return False
 
         elif label == 3 and len_fields_of_label > 10:
-            if continuous_neighbors < 3:
+            if continuous_neighbors < 2:
                 return False
     else:
         return True
     return True
 
 
-def evaluate_board_position(curr_board, player_black, game_round_number):
+def evaluate_board_position(curr_board, is_me_player_black, game_round_number):
     """
     Evaluates the board position based on the current state of the board.
 
@@ -106,15 +105,15 @@ def evaluate_board_position(curr_board, player_black, game_round_number):
     Returns:
     float: The evaluation score of the board position.
     """
-    color = 'black' if player_black else 'white'
-    # enemy_color = 'white' if player_black else 'black'
+    color = 'black' if is_me_player_black else 'white'
+    enemy_color = 'white' if is_me_player_black else 'black'
     own_connected_area = my_count_connected_area(curr_board, color)
-    # enemy_connected_area = my_count_connected_area(curr_board, enemy_color)
+    enemy_connected_area = my_count_connected_area(curr_board, enemy_color)
     own_total_area = count_hexagons_of(curr_board, color)
-    # enemy_total_area = count_hexagons_of(curr_board, enemy_color)
+    enemy_total_area = count_hexagons_of(curr_board, enemy_color)
     connected_factor = 1#game_round_number * 0.05
 
-    return (own_connected_area) * connected_factor #+ own_total_area
+    return (own_connected_area - enemy_connected_area) * connected_factor + own_total_area - enemy_total_area
 
 
 def generate_promising_moves_with_board(hexes_by_label, curr_board, is_player_black, game_round_number):
