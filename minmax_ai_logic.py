@@ -6,7 +6,7 @@ import random
 import time
 from multiprocessing import Pool, cpu_count, Manager, TimeoutError
 import tracemalloc
-from ai_helper_functions import gen_combinations, generate_promising_moves_with_board, is_promising_move, evaluate_board_position, generate_minimized_promising_moves
+from ai_helper_functions import gen_combinations, generate_promising_moves_with_board, is_promising_move, evaluate_board_position, is_promising_move_min
 import copy
 
 def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
@@ -52,7 +52,10 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
 
         for move in move_combinations:
             # print("combination: " + str(combination))
-            if not is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
+            #prune the children depending whether it's max or min mode
+            if max_mode and not is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
+                continue
+            elif not max_mode and not is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
                 continue
             #apply move
             for hex_field in move:
@@ -91,7 +94,7 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
     return best_utility, best_moves
 
 
-def start_thread(move, hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number, lock, memory_debug):
+def start_thread(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number, lock, memory_debug):
     """
     Starts a thread to perform the min-max search.
 
@@ -123,10 +126,10 @@ def start_thread(move, hexes_by_label, curr_board, is_me_player_black, remaining
             local_alpha = -float('inf')
 
     # apply the first move
-    player_color = 'black' if is_me_player_black else 'white'
-    hexes_by_label[move[1]] = [hex_field for hex_field in hexes_by_label[move[1]] if hex_field[0] not in move[0]]
-    for hex_coords in move[0]:
-        curr_board[hex_coords]['owner'] = player_color
+    # player_color = 'black' if is_me_player_black else 'white'
+    # hexes_by_label[move[1]] = [hex_field for hex_field in hexes_by_label[move[1]] if hex_field[0] not in move[0]]
+    # for hex_coords in move[0]:
+    #     curr_board[hex_coords]['owner'] = player_color
 
 
     best_move = recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black,
@@ -169,14 +172,15 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
     start_time = time.time()
     thread_num = cpu_count()
 
-    pure_promising_moves = generate_minimized_promising_moves(
-        hexes_by_label, game_round_number)
-    print(f"{len(pure_promising_moves)} Pure First Level Moves calculcated")
-
+    # pure_promising_moves = generate_minimized_promising_moves(
+    #     hexes_by_label, game_round_number)
+    # print(f"{len(pure_promising_moves)} Pure First Level Moves calculcated")
+    promising_moves = generate_promising_moves_with_board(
+        hexes_by_label, curr_board, is_me_player_black, game_round_number)
     # promising_moves = generate_promising_moves_with_board(
     #     hexes_by_label, curr_board, is_me_player_black, game_round_number)
-    # random.shuffle(promising_moves)
-    # print(f"{len(promising_moves)} First Level Branches will execute in parallel")
+    random.shuffle(promising_moves)
+    print(f"{len(promising_moves)} First Level Branches will execute in parallel")
     # set(promising_moves)
     # print(f"{len(promising_moves)} First Level Branches after removing duplicates")
     # reduce timeout for extra time buffer
@@ -200,8 +204,8 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
             with Pool(processes=thread_num) as pool:
 
                 results = [pool.apply_async(start_thread,
-                                            (move, hexes_by_label, curr_board, is_me_player_black, iteration_depth - 1, alpha,
-                                             beta, not max_mode, game_round_number + 1, lock, memory_debug)) for move in pure_promising_moves]
+                                            (hex, board, is_me_player_black, iteration_depth - 1, alpha,
+                                             beta, not max_mode, game_round_number + 1, lock, memory_debug)) for hex, board in promising_moves]
 
                 time_to_wait = curr_timeout  # initial time to wait
                 for result in results:
@@ -230,4 +234,6 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
             f"Average memory usage of processes: {(sum(memory_usages)/ len(memory_usages))/ 10**6}MB")
     if not max_moves:
         return None
-    return max(max_moves, key=lambda x: x[0])[1]
+    max_move = max(max_moves, key=lambda x: x[0])
+    print("utility: " + str(max_move[0]))
+    return max_move[1]
