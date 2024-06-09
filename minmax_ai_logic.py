@@ -6,7 +6,7 @@ import random
 import time
 from multiprocessing import Pool, cpu_count, Manager, TimeoutError
 import tracemalloc
-from ai_helper_functions import gen_combinations, generate_promising_moves_with_board, is_promising_move, evaluate_board_position, is_promising_move_min
+from ai_helper_functions import gen_combinations, generate_promising_moves_with_board, is_promising_move, evaluate_board_position
 import copy
 
 def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number):
@@ -53,10 +53,9 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
         for move in move_combinations:
             # print("combination: " + str(combination))
             #prune the children depending whether it's max or min mode
-            if max_mode and not is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
+            if not is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
                 continue
-            elif not max_mode and not is_promising_move(len(hexes_by_label[label]), move, game_round_number, label):
-                continue
+
             #apply move
             for hex_field in move:
                 curr_board[hex_field[0]]['owner'] = curr_player_color
@@ -94,11 +93,12 @@ def recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black, rem
     return best_utility, best_moves
 
 
-def start_thread(hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number, lock, memory_debug):
+def start_thread(move, hexes_by_label, curr_board, is_me_player_black, remaining_depth, alpha, beta, max_mode, game_round_number, lock, memory_debug):
     """
     Starts a thread to perform the min-max search.
 
     Args:
+        move (tuple): The move that is evaluated.
         hexes_by_label (dict): Available hexes to choose from grouped by label.
         curr_board (dict): Copy of the game board.
         is_me_player_black (bool): Indicates if the current player is black.
@@ -132,7 +132,7 @@ def start_thread(hexes_by_label, curr_board, is_me_player_black, remaining_depth
     #     curr_board[hex_coords]['owner'] = player_color
 
 
-    best_move = recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black,
+    best_utility, _ = recursive_min_max_search(hexes_by_label, curr_board, is_me_player_black,
                                          remaining_depth, local_alpha, local_beta, max_mode, game_round_number)
 
     # Stop tracing and get the current, peak and cumulative memory usage
@@ -145,11 +145,11 @@ def start_thread(hexes_by_label, curr_board, is_me_player_black, remaining_depth
     # update global alpha and beta
     if not max_mode:  # inversed because we get max_mode as inversed
         with lock:
-            alpha.value = max(alpha.value, best_move[0])
+            alpha.value = max(alpha.value, best_utility)
     else:
         with lock:
-            beta.value = min(beta.value, best_move[0])
-    return best_move, memory_peak
+            beta.value = min(beta.value, best_utility)
+    return (best_utility, move), memory_peak
 
 
 def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_round_number, timeout):
@@ -204,8 +204,8 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
             with Pool(processes=thread_num) as pool:
 
                 results = [pool.apply_async(start_thread,
-                                            (hex, board, is_me_player_black, iteration_depth - 1, alpha,
-                                             beta, not max_mode, game_round_number + 1, lock, memory_debug)) for hex, board in promising_moves]
+                                            (move, hex, board, is_me_player_black, iteration_depth - 1, alpha,
+                                             beta, not max_mode, game_round_number + 1, lock, memory_debug)) for move, hex, board in promising_moves]
 
                 time_to_wait = curr_timeout  # initial time to wait
                 for result in results:
