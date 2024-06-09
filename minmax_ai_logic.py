@@ -195,7 +195,7 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
         curr_timeout = timeout - (time.time() - start_time)
         iteration_depth += 1
         print(
-            f"Iteration: {iteration_depth} starts, time limit: {curr_timeout} s")
+            f"Iteration: {iteration_depth} starts, time limit: {curr_timeout}s")
         with Manager() as manager:
             alpha = manager.Value('d', -float('inf'))
             beta = manager.Value('d', float('inf'))

@@ -468,7 +468,7 @@ def select_hexes_by_ai(hexes_by_label, curr_round, curr_turn):
             }
 
             MODE = 'MINMAX' # 'MCTS' or 'MINMAX'
-            TIMEOUT = 1000
+            TIMEOUT = 30
             
             local_start_time = time.time()
             if MODE == "MINMAX":

@@ -3,6 +3,48 @@ import random
 import itertools
 
 
+def is_promising_move_min(len_fields_of_label, move, game_round_number, label):
+    """
+    Determines if a move is promising based on the given parameters.
+
+    Args:
+        len_fields_of_label (int): The length of fields of the given label.
+        move (list): A list of hex_info representing the move.
+        game_round_number (int): The current round number of the game.
+        label (int): The label to check for.
+
+    Returns:
+        bool: True if the move is promising, False otherwise.
+    """
+    # continuous_neighbors = count_continuous_neighbors(
+        # [hex_info[0] for hex_info in move])
+    early_start_phase = 4
+    start_phase = 10
+    mid_phase = 20
+    end_phase = 34
+
+    if game_round_number < early_start_phase:
+        if label in [2, 3]:
+            return False
+
+    # elif game_round_number < start_phase:
+    #     if label in [2, 3] and continuous_neighbors < label:
+    #         return False
+    #     elif label == 5 and continuous_neighbors < 3:
+    #         return False
+
+    # elif game_round_number < mid_phase:
+    #     if label == 2 and len_fields_of_label > 10:
+    #         if continuous_neighbors < 2:
+    #             return False
+
+    #     elif label == 3 and len_fields_of_label > 10:
+    #         if continuous_neighbors < 3:
+    #             return False
+    # else:
+    #     return True
+    return True
+
 def is_promising_move(len_fields_of_label, move, game_round_number, label):
     """
     Determines if a move is promising based on the given parameters.
@@ -16,7 +58,6 @@ def is_promising_move(len_fields_of_label, move, game_round_number, label):
     Returns:
         bool: True if the move is promising, False otherwise.
     """
-    return True
     continuous_neighbors = count_continuous_neighbors(
         [hex_info[0] for hex_info in move])
     early_start_phase = 4
@@ -24,28 +65,34 @@ def is_promising_move(len_fields_of_label, move, game_round_number, label):
     mid_phase = 20
     end_phase = 34
 
+    if label == 5 and len_fields_of_label > 10:
+        if continuous_neighbors < 3:
+            return False
+
+    if label == 3 and len_fields_of_label > 15:
+        if continuous_neighbors < 2:
+            return False
     if game_round_number < early_start_phase:
         if label in [2, 3] and continuous_neighbors < label:
             return False
-        elif label == 5 and continuous_neighbors < 4:
+        if label == 5 and continuous_neighbors < 4:
             return False
 
     elif game_round_number < start_phase:
         if label in [2, 3] and continuous_neighbors < label:
             return False
-        elif label == 5 and continuous_neighbors < 3:
+        if label == 5 and continuous_neighbors < 3:
             return False
 
-    elif game_round_number < mid_phase:
-        if label == 2 and len_fields_of_label > 10:
-            if continuous_neighbors < 2:
-                return False
+    # elif game_round_number < mid_phase:
+    #     if label == 2 and len_fields_of_label > 10:
+    #         if continuous_neighbors < 2:
+    #             return False
 
-        elif label == 3 and len_fields_of_label > 10:
-            if continuous_neighbors < 3:
-                return False
-    else:
-        return True
+    #     elif label == 3 and len_fields_of_label > 10:
+    #         if continuous_neighbors < 3:
+    #             return False
+
     return True
 
 
@@ -113,7 +160,7 @@ def evaluate_board_position(curr_board, is_me_player_black, game_round_number):
     enemy_total_area = count_hexagons_of(curr_board, enemy_color)
     connected_factor = 1#game_round_number * 0.05
 
-    return (own_connected_area - enemy_connected_area) * connected_factor + own_total_area - enemy_total_area
+    return (own_connected_area - enemy_connected_area) * connected_factor
 
 
 def generate_promising_moves_with_board(hexes_by_label, curr_board, is_player_black, game_round_number):
