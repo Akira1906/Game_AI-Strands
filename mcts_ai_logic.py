@@ -197,14 +197,14 @@ def init_mcts_search(hexes_by_label, hex_board, is_me_player_black, game_round_n
     start_time = time.time()
     # root parallelization
     # create multiple trees in parallel, later compare the nodes and choose the best one
-    number_of_threads = 1
-    timeout -= 1
+    number_of_processes = 1
+    timeout -= 2
 
     processes = []
     manager = Manager()
     return_dict = manager.dict()
 
-    for i in range(number_of_threads):
+    for i in range(number_of_processes):
         process = Process(
             target=start_mcts_thread,
             args=(hexes_by_label, hex_board, is_me_player_black,

@@ -170,20 +170,13 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
     max_mode = True
     memory_debug = False
     start_time = time.time()
-    thread_num = cpu_count()
+    process_num = cpu_count()
 
-    # pure_promising_moves = generate_minimized_promising_moves(
-    #     hexes_by_label, game_round_number)
-    # print(f"{len(pure_promising_moves)} Pure First Level Moves calculcated")
     promising_moves = generate_promising_moves_with_board(
         hexes_by_label, curr_board, is_me_player_black, game_round_number)
-    # promising_moves = generate_promising_moves_with_board(
-    #     hexes_by_label, curr_board, is_me_player_black, game_round_number)
     random.shuffle(promising_moves)
-    print(f"{len(promising_moves)} First Level Branches will execute in parallel")
-    # set(promising_moves)
-    # print(f"{len(promising_moves)} First Level Branches after removing duplicates")
-    # reduce timeout for extra time buffer
+    # print(f"{len(promising_moves)} First Level Branches will execute in parallel")
+
     timeout -= 1
     # start iteration depth: 2
     iteration_depth = 2 - 1
@@ -194,14 +187,14 @@ def init_min_max_search(hexes_by_label, curr_board, is_me_player_black, game_rou
         local_start_time = time.time()
         curr_timeout = timeout - (time.time() - start_time)
         iteration_depth += 1
-        print(
-            f"Iteration: {iteration_depth} starts, time limit: {curr_timeout}s")
+        # print(
+            # f"Iteration: {iteration_depth} starts, time limit: {curr_timeout}s")
         with Manager() as manager:
             alpha = manager.Value('d', -float('inf'))
             beta = manager.Value('d', float('inf'))
             lock = manager.Lock()
 
-            with Pool(processes=thread_num) as pool:
+            with Pool(processes=process_num) as pool:
 
                 results = [pool.apply_async(start_thread,
                                             (move, hex, board, is_me_player_black, iteration_depth - 1, alpha,
